@@ -1,25 +1,29 @@
 import discord
 from discord.ext import tasks
+from discord.ui import View, Button
 import asyncio
 import json
 import os
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timezone
 import random
+import string
 
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
+# Files
 QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
+# Load or initialize data stores
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    return []
 
 def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
@@ -33,7 +37,6 @@ used_question_ids = set()
 current_riddle = None
 current_answer_revealed = False
 correct_users = set()
-leaderboard_pages = {}
 
 def get_rank(score, streak):
     if score <= 5:
@@ -64,24 +67,43 @@ def format_question_text(qdict):
     return base
 
 def count_unused_questions():
-    return len([q for q in submitted_questions if q["id"] not in used_question_ids])
+    return len([q for q in submitted_questions if q.get("id") not in used_question_ids])
 
 def pick_next_riddle():
-    unused = [q for q in submitted_questions if q["id"] not in used_question_ids]
+    unused = [q for q in submitted_questions if q.get("id") not in used_question_ids]
     if not unused:
         used_question_ids.clear()
         unused = submitted_questions[:]
     riddle = random.choice(unused)
-    used_question_ids.add(riddle["id"])
+    if riddle.get("id"):
+        used_question_ids.add(riddle["id"])
     return riddle
 
 def save_all_scores():
     save_json(SCORES_FILE, scores)
     save_json(STREAKS_FILE, streaks)
 
+def normalize_answer(text):
+    text = text.lower().strip()
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    if text.endswith('s'):
+        text = text[:-1]
+    return text
+
+@client.event
+async def on_ready():
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    print("------")
+    await tree.sync()
+
+    # Post today's riddle immediately on startup (today only)
+    await post_special_riddle()
+
+    post_riddle.start()
+    reveal_answer.start()
+
 async def post_special_riddle():
     global current_riddle, current_answer_revealed, correct_users
-
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
         print("DISCORD_CHANNEL_ID not set.")
@@ -99,78 +121,9 @@ async def post_special_riddle():
     }
     current_answer_revealed = False
     correct_users = set()
+
     question_text = format_question_text(current_riddle)
     await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
-
-@client.event
-async def on_ready():
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
-    print("------")
-    await tree.sync()
-
-    # Post today's special riddle immediately (only once)
-    await post_special_riddle()
-
-    # Start daily post and reveal loops (normal schedule starts tomorrow)
-    post_riddle.start()
-    reveal_answer.start()
-
-@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
-async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users
-
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found.")
-        return
-
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users = set()
-
-    question_text = format_question_text(current_riddle)
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-
-@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
-async def reveal_answer():
-    global current_answer_revealed, correct_users
-
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-    channel = client.get_channel(channel_id)
-    if not channel or not current_riddle:
-        return
-
-    current_answer_revealed = True
-    correct_answer = current_riddle["answer"]
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    if correct_users:
-        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
-        lines.append(f"Submitted by: {submitter_text}\n")
-        lines.append("The following users got it correct:")
-
-        top_scorers = get_top_scorers()
-        for uid in correct_users:
-            uid_str = str(uid)
-            user = await client.fetch_user(uid)
-            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
-            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
-            lines.append(f"• {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
-        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
-        await channel.send("\n".join(lines))
-    else:
-        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
 
 @client.event
 async def on_message(message):
@@ -213,32 +166,26 @@ async def on_message(message):
         await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
         return
 
-    if content == "!leaderboard":
-        leaderboard_pages[user_id] = 0
-        await show_leaderboard(message.channel, user_id)
-        return
-
-    if content == "!next":
-        if user_id in leaderboard_pages:
-            leaderboard_pages[user_id] += 1
-            await show_leaderboard(message.channel, user_id)
-        return
-
-    if content == "!prev":
-        if user_id in leaderboard_pages and leaderboard_pages[user_id] > 0:
-            leaderboard_pages[user_id] -= 1
-            await show_leaderboard(message.channel, user_id)
-        return
+    # No more !next or !prev commands — buttons handle pagination.
 
     if current_riddle and not current_answer_revealed:
-        guess = content.lower()
-        correct_answer = current_riddle["answer"].lower()
-        if guess == correct_answer:
+        guess_norm = normalize_answer(content)
+        answer_norm = normalize_answer(current_riddle["answer"])
+
+        if guess_norm == answer_norm:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
             correct_users.add(message.author.id)
             scores[user_id] = scores.get(user_id, 0) + 1
             streaks[user_id] = streaks.get(user_id, 0) + 1
             save_all_scores()
-            await message.channel.send(f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}")
+
+            await message.channel.send(
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
+            )
         else:
             try:
                 await message.delete()
@@ -252,16 +199,69 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 • `!score` – View your score and rank.
 • `!submit_riddle question | answer` – Submit a new riddle.
 • `!leaderboard` – Show the top solvers.
-• `!next` / `!prev` – Navigate the leaderboard.
 • Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
 
-async def show_leaderboard(channel, user_id):
-    page = leaderboard_pages.get(user_id, 0)
+class LeaderboardView(View):
+    def __init__(self, user_id):
+        super().__init__(timeout=120)  # 2 minutes timeout
+        self.user_id = user_id
+        self.page = 0
+
+    async def update_leaderboard(self, interaction: discord.Interaction):
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+        self.page = max(0, min(self.page, total_pages - 1))
+
+        embed = discord.Embed(
+            title=f"🏆 Riddle Leaderboard (Page {self.page + 1}/{total_pages})",
+            description="Top riddle solvers by total correct guesses",
+            color=discord.Color.gold()
+        )
+
+        start = self.page * 10
+        top_score = sorted_scores[0][1] if sorted_scores else 0
+        top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
+
+        for i, (uid, score) in enumerate(sorted_scores[start:start+10], start=start + 1):
+            user = await client.fetch_user(int(uid))
+            streak = streaks.get(uid, 0)
+            rank = get_rank(score, streak)
+            extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
+            embed.add_field(
+                name=f"{i}. {user.display_name}",
+                value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}{extra}",
+                inline=False
+            )
+
+        embed.set_footer(text="Use the buttons below to navigate pages")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.primary)
+    async def prev_button(self, button: Button, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot control this leaderboard.", ephemeral=True)
+            return
+        self.page -= 1
+        await self.update_leaderboard(interaction)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
+    async def next_button(self, button: Button, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("You cannot control this leaderboard.", ephemeral=True)
+            return
+        self.page += 1
+        await self.update_leaderboard(interaction)
+
+@tree.command(name="leaderboard", description="Show the riddle leaderboard with pagination buttons")
+async def leaderboard(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    view = LeaderboardView(user_id)
+    # Send initial embed with page 0
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
-    page = min(page, total_pages - 1)
+    page = 0
 
     embed = discord.Embed(
         title=f"🏆 Riddle Leaderboard (Page {page + 1}/{total_pages})",
@@ -284,8 +284,63 @@ async def show_leaderboard(channel, user_id):
             inline=False
         )
 
-    embed.set_footer(text="Use !next and !prev to navigate pages")
-    await channel.send(embed=embed)
+    embed.set_footer(text="Use the buttons below to navigate pages")
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
+async def post_riddle():
+    global current_riddle, current_answer_revealed, correct_users
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Channel not found.")
+        return
+
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users = set()
+
+    question_text = format_question_text(current_riddle)
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
+@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
+async def reveal_answer():
+    global current_answer_revealed, correct_users
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+    channel = client.get_channel(channel_id)
+    if not channel or not current_riddle:
+        return
+
+    current_answer_revealed = True
+    correct_answer = current_riddle["answer"]
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    if correct_users:
+        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
+        lines.append(f"Submitted by: {submitter_text}\n")
+        lines.append("The following users got it correct:")
+
+        top_scorers = get_top_scorers()
+        for uid in correct_users:
+            uid_str = str(uid)
+            user = await client.fetch_user(uid)
+            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
+            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
+            lines.append(f"• {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
+        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
+        await channel.send("\n".join(lines))
+    else:
+        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
 
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
