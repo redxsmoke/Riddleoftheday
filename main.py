@@ -150,48 +150,53 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Only respond in the configured channel
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if message.channel.id != channel_id:
         return
 
-    # Commands - do not delete
-    if content == "!score":
-        score = scores.get(user_id, 0)
-        streak = streaks.get(user_id, 0)
-        rank = get_rank(score, streak)
-        await message.channel.send(
-            f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
-        )
-        return
+    # Command messages (start with ! or are slash commands) should NOT be deleted or count as guesses
 
-    if content == "!leaderboard":
-        leaderboard_pages[user_id] = 0
-        await show_leaderboard(message.channel, user_id)
-        return
-
-    if content.startswith("!submit_riddle "):
-        try:
-            _, rest = content.split(" ", 1)
-            question, answer = rest.split("|", 1)
-            question = question.strip()
-            answer = answer.strip()
-            if not question or not answer:
-                await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
+    # Check for commands that start with "!"
+    if content.startswith("!"):
+        if content == "!score":
+            score = scores.get(user_id, 0)
+            streak = streaks.get(user_id, 0)
+            rank = get_rank(score, streak)
+            await message.channel.send(
+                f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
+            )
+            return
+        if content == "!leaderboard":
+            leaderboard_pages[user_id] = 0
+            await show_leaderboard(message.channel, user_id)
+            return
+        if content.startswith("!submit_riddle "):
+            try:
+                _, rest = content.split(" ", 1)
+                question, answer = rest.split("|", 1)
+                question = question.strip()
+                answer = answer.strip()
+                if not question or not answer:
+                    await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
+                    return
+            except Exception:
+                await message.channel.send("\u274c Invalid format. Use: `!submit_riddle Your question here | The answer here`")
                 return
-        except Exception:
-            await message.channel.send("\u274c Invalid format. Use: `!submit_riddle Your question here | The answer here`")
+
+            new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+            submitted_questions.append({
+                "id": new_id,
+                "question": question,
+                "answer": answer,
+                "submitter_id": user_id
+            })
+            save_json(QUESTIONS_FILE, submitted_questions)
+            await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
             return
 
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-        submitted_questions.append({
-            "id": new_id,
-            "question": question,
-            "answer": answer,
-            "submitter_id": user_id
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
-        await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
+        # Other !commands can be added here if needed
+
+        # Do NOT delete command messages or count as guesses
         return
 
     # If user already guessed correctly, delete further messages & notify, no penalty
@@ -253,6 +258,20 @@ async def on_message(message):
             await message.delete()
         except Exception:
             pass
+
+# Slash command to show all commands
+@tree.command(name="riddleofthedaycommands", description="List all Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands_list = (
+        "**Available Commands:**\n"
+        "• `!score` - Show your current score and streak.\n"
+        "• `!leaderboard` - Show the leaderboard of top solvers.\n"
+        "• `!submit_riddle Your question here | The answer here` - Submit a new riddle.\n"
+        "• `/riddleofthedaycommands` - Show this list of commands.\n"
+        "\n"
+        "Note: Commands can be used anytime in the designated riddle channel."
+    )
+    await interaction.response.send_message(commands_list, ephemeral=True)
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
