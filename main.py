@@ -16,7 +16,6 @@ QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
-# Load or initialize data stores
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -36,8 +35,6 @@ current_riddle = None
 current_answer_revealed = False
 correct_users = set()
 leaderboard_pages = {}
-
-# Now guess_attempts tracks guesses per user per riddle: keys are (user_id, riddle_id)
 guess_attempts = {}
 
 def get_rank(score, streak):
@@ -102,7 +99,7 @@ async def on_ready():
         print("Channel not found.")
         return
 
-    # PURGE all messages in the specified channel (today only)
+    # Purge all messages in the specified channel (today only)
     async for message in channel.history(limit=None):
         try:
             await message.delete()
@@ -153,13 +150,12 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Ignore messages outside the configured channel
+    # Only respond in the configured channel
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if message.channel.id != channel_id:
         return
 
-    # Commands - do not delete these messages so users can run commands freely
-
+    # Commands - do not delete
     if content == "!score":
         score = scores.get(user_id, 0)
         streak = streaks.get(user_id, 0)
@@ -198,8 +194,13 @@ async def on_message(message):
         await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
         return
 
-    # If message is a command (starts with !) do NOT delete
-    if content.startswith("!"):
+    # If user already guessed correctly, delete further messages & notify, no penalty
+    if user_id in correct_users:
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await message.channel.send(f"ℹ️ {message.author.mention}, you have already guessed the correct answer.")
         return
 
     # Guessing logic for current riddle, only if answer not revealed yet
@@ -217,24 +218,21 @@ async def on_message(message):
                 pass
             return
 
-        guess_attempts[guess_key] = user_attempts + 1
-
         guess = content.lower()
         correct_answer = current_riddle["answer"].lower()
 
         if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
-            if user_id in correct_users:
-                await message.channel.send(f"ℹ️ {message.author.mention}, you have already guessed the correct answer.")
-            else:
-                correct_users.add(user_id)
-                scores[user_id] = max(0, scores.get(user_id, 0)) + 1
-                streaks[user_id] = streaks.get(user_id, 0) + 1
-                save_all_scores()
+            correct_users.add(user_id)
+            scores[user_id] = max(0, scores.get(user_id, 0)) + 1
+            streaks[user_id] = streaks.get(user_id, 0) + 1
+            save_all_scores()
 
-                await message.channel.send(
-                    f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
-                )
+            await message.channel.send(
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
+            )
         else:
+            # Only count incorrect guesses before correct guess
+            guess_attempts[guess_key] = user_attempts + 1
             remaining = 5 - guess_attempts[guess_key]
             if remaining == 0:
                 await message.channel.send(
