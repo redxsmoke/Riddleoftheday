@@ -3,7 +3,7 @@ from discord.ext import tasks
 import asyncio
 import json
 import os
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timezone, timedelta
 import random
 
 intents = discord.Intents.default()
@@ -11,12 +11,10 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
-# Files
 QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
-# Load or initialize data stores
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -81,53 +79,98 @@ def save_all_scores():
     save_json(SCORES_FILE, scores)
     save_json(STREAKS_FILE, streaks)
 
-@client.event
-async def on_ready():
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
-    print("------")
-    await tree.sync()
-
-    # Schedule today's special riddle for 21:15 UTC (5:15 PM EST)
-    now = datetime.utcnow()
-    target_time = now.replace(hour=21, minute=15, second=0, microsecond=0)
-    if now < target_time:
-        delay = (target_time - now).total_seconds()
-        print(f"⏳ Scheduling today’s riddle in {int(delay)} seconds...")
-        asyncio.create_task(schedule_today_riddle(delay))
-    else:
-        print("⚠️ Missed today’s special riddle post window.")
-
-    post_riddle.start()
-    reveal_answer.start()
-
-async def schedule_today_riddle(delay):
-    await asyncio.sleep(delay)
-
+async def post_special_riddle():
     global current_riddle, current_answer_revealed, correct_users
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
         print("DISCORD_CHANNEL_ID not set.")
         return
-
     channel = client.get_channel(channel_id)
     if not channel:
         print("Channel not found.")
         return
 
-    # Hardcoded riddle for today
     current_riddle = {
         "id": "manual_egg",
         "question": "What has to be broken before you can use it?",
         "answer": "Egg",
         "submitter_id": None
     }
+    current_answer_revealed = False
+    correct_users = set()
+    question_text = format_question_text(current_riddle)
+    await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
 
+@client.event
+async def on_ready():
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    print("------")
+    await tree.sync()
+
+    # Post today's special riddle immediately (only once)
+    await post_special_riddle()
+
+    # Start daily post and reveal loops (normal schedule starts tomorrow)
+    post_riddle.start()
+    reveal_answer.start()
+
+@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
+async def post_riddle():
+    global current_riddle, current_answer_revealed, correct_users
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Channel not found.")
+        return
+
+    current_riddle = pick_next_riddle()
     current_answer_revealed = False
     correct_users = set()
 
     question_text = format_question_text(current_riddle)
-    await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
+@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
+async def reveal_answer():
+    global current_answer_revealed, correct_users
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+    channel = client.get_channel(channel_id)
+    if not channel or not current_riddle:
+        return
+
+    current_answer_revealed = True
+    correct_answer = current_riddle["answer"]
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    if correct_users:
+        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
+        lines.append(f"Submitted by: {submitter_text}\n")
+        lines.append("The following users got it correct:")
+
+        top_scorers = get_top_scorers()
+        for uid in correct_users:
+            uid_str = str(uid)
+            user = await client.fetch_user(uid)
+            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
+            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
+            lines.append(f"• {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
+        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
+        await channel.send("\n".join(lines))
+    else:
+        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
 
 @client.event
 async def on_message(message):
@@ -213,61 +256,6 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 • Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
-
-@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
-async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found.")
-        return
-
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users = set()
-
-    question_text = format_question_text(current_riddle)
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-
-@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
-async def reveal_answer():
-    global current_answer_revealed, correct_users
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-    channel = client.get_channel(channel_id)
-    if not channel or not current_riddle:
-        return
-
-    current_answer_revealed = True
-    correct_answer = current_riddle["answer"]
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    if correct_users:
-        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
-        lines.append(f"Submitted by: {submitter_text}\n")
-        lines.append("The following users got it correct:")
-
-        top_scorers = get_top_scorers()
-        for uid in correct_users:
-            uid_str = str(uid)
-            user = await client.fetch_user(uid)
-            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
-            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
-            lines.append(f"• {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
-        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
-        await channel.send("\n".join(lines))
-    else:
-        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
 
 async def show_leaderboard(channel, user_id):
     page = leaderboard_pages.get(user_id, 0)
