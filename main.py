@@ -201,14 +201,17 @@ async def on_message(message):
         answer_simple = correct_answer.rstrip("s")
 
         if guess == correct_answer or guess_simple == answer_simple:
-            correct_users.add(message.author.id)
-            scores[user_id] = scores.get(user_id, 0) + 1
-            streaks[user_id] = streaks.get(user_id, 0) + 1
-            save_all_scores()
+            if message.author.id in correct_users:
+                await message.channel.send(f"ℹ️ {message.author.mention}, you have already guessed the correct answer for this riddle.")
+            else:
+                correct_users.add(message.author.id)
+                scores[user_id] = scores.get(user_id, 0) + 1
+                streaks[user_id] = streaks.get(user_id, 0) + 1
+                save_all_scores()
 
-            await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
-            )
+                await message.channel.send(
+                    f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
+                )
         else:
             remaining = 5 - guess_attempts[user_id]
             if remaining == 0:
@@ -271,12 +274,8 @@ async def reveal_answer():
 
     now_utc = datetime.utcnow()
 
-    # For June 26 only, reveal answer at 9:00 PM EST (21:00 -4:00 = 01:00 UTC next day)
-    # So if today is June 26, reveal at 1:00 AM UTC June 27
-    # For simplicity, we'll check date and time and skip if before that for June 26 only
-    # After June 26, reveal at 23:00 UTC as normal
     if now_utc.date() == datetime(2025, 6, 26).date():
-        est_reveal_time_utc = datetime(2025, 6, 27, 1, 0, 0)  # 9 PM EST June 26 is 01:00 UTC June 27
+        est_reveal_time_utc = datetime(2025, 6, 27, 1, 0, 0)  # 9 PM EST June 26 = 01:00 UTC June 27
         if now_utc < est_reveal_time_utc:
             return
 
