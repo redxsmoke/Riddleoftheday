@@ -3,7 +3,7 @@ from discord.ext import tasks
 import asyncio
 import json
 import os
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timezone
 import random
 
 intents = discord.Intents.default()
@@ -95,7 +95,7 @@ async def on_ready():
     reveal_answer.start()
 
 async def post_special_riddle():
-    global current_riddle, current_answer_revealed, correct_users
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
@@ -128,6 +128,7 @@ async def on_message(message):
 
     content = message.content.strip()
     user_id = str(message.author.id)
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 
     # Commands
     if content == "!score":
@@ -180,15 +181,15 @@ async def on_message(message):
         user_attempts = guess_attempts.get(user_id, 0)
         if user_attempts >= 5:
             await message.channel.send(f"❌ You're out of attempts for today's riddle, {message.author.mention}.")
-            try:
-                await message.delete()
-            except Exception:
-                pass
+            if message.channel.id == channel_id:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
             return
 
         guess_attempts[user_id] = user_attempts + 1
 
-        # Accept minor plural difference, e.g. egg vs eggs
         guess_simple = guess.rstrip("s")
         answer_simple = correct_answer.rstrip("s")
 
@@ -204,13 +205,11 @@ async def on_message(message):
         else:
             remaining = 5 - guess_attempts[user_id]
             if remaining == 0:
-                # On last guess - warn they will lose 1 point next wrong guess
                 await message.channel.send(
                     f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no attempts left. "
                     "If you guess incorrectly again, you will lose 1 point."
                 )
             elif remaining < 0:
-                # Deduct 1 point but keep minimum zero
                 old_score = scores.get(user_id, 0)
                 new_score = max(old_score - 1, 0)
                 scores[user_id] = new_score
@@ -224,10 +223,11 @@ async def on_message(message):
                     f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
                 )
 
-        try:
-            await message.delete()
-        except Exception:
-            pass
+        if message.channel.id == channel_id:
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
@@ -262,22 +262,6 @@ async def reveal_answer():
     channel = client.get_channel(channel_id)
     if not channel or not current_riddle:
         return
-
-    now_utc = datetime.utcnow()
-
-    # For today only: close submission & reveal answer at 9:00 PM EST (21:00 EST = 01:00 UTC next day)
-    est_offset = timedelta(hours=-5)
-    est_now = now_utc + est_offset
-
-    reveal_hour = 23
-    reveal_minute = 0
-    # Check if today is today’s date (for today, use 9PM EST reveal)
-    if est_now.date() == now_utc.date():
-        reveal_hour = 21 + 5  # 9 PM EST converted to UTC = 2 AM UTC next day, but simpler to just override below
-        # But 21:00 EST = 02:00 UTC next day, so handle that carefully:
-        # We'll just do 21:00 EST = 02:00 UTC (day +1)
-        # Since this loop runs at 23:00 UTC, and that is after 02:00 UTC, so for today
-        # let's just keep it at 21:00 EST by scheduling reveal manually (see on_ready)
 
     current_answer_revealed = True
     correct_answer = current_riddle["answer"]
@@ -330,17 +314,6 @@ async def show_leaderboard(channel, user_id):
 
     embed.set_footer(text="Use !leaderboard again to refresh")
     await channel.send(embed=embed)
-
-@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands = """
-**Available Riddle Bot Commands:**
-• `!score` – View your score and rank.
-• `!submit_riddle question | answer` – Submit a new riddle.
-• `!leaderboard` – Show the top solvers.
-• Just type your guess to answer the riddle!
-"""
-    await interaction.response.send_message(commands, ephemeral=True)
 
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
