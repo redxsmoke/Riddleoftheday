@@ -16,6 +16,8 @@ QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
+MODERATOR_ROLE_NAME = "Moderator"  # Change if your mod role is named differently
+
 # Load or initialize data stores
 def load_json(file):
     if os.path.exists(file):
@@ -92,6 +94,39 @@ async def purge_channel_messages(channel):
     except Exception as e:
         print(f"Error during purge: {e}")
 
+def is_admin_or_mod(member: discord.Member):
+    if member.guild_permissions.administrator:
+        return True
+    for role in member.roles:
+        if role.name == MODERATOR_ROLE_NAME:
+            return True
+    return False
+
+def get_next_reveal_datetime():
+    # For today only (until 23:00 UTC or 1:00 UTC depending on date)
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    # If today is the first day you want 1:00 UTC reveal, otherwise 23:00 UTC
+    # Let's assume "today" means the date of the script run
+    reveal_hour_today = 1  # 1:00 UTC
+    reveal_hour_after_today = 23  # 23:00 UTC starting tomorrow
+
+    reveal_time_today = now_utc.replace(hour=reveal_hour_today, minute=0, second=0, microsecond=0)
+    if now_utc < reveal_time_today:
+        return reveal_time_today
+    else:
+        # Next day at 23:00 UTC
+        next_day = (now_utc + timedelta(days=1)).replace(hour=reveal_hour_after_today, minute=0, second=0, microsecond=0)
+        return next_day
+
+def get_time_until_reveal():
+    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    reveal_time = get_next_reveal_datetime()
+    diff = reveal_time - now_utc
+    total_seconds = int(diff.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    return hours, minutes
+
 @client.event
 async def on_ready():
     global purged_on_startup, current_riddle, current_answer_revealed, correct_users, guess_attempts
@@ -108,10 +143,12 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
+            # Reset riddle state so the bot knows to start fresh
             current_riddle = None
             current_answer_revealed = False
             correct_users.clear()
             guess_attempts.clear()
+            # Post the initial riddle right after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -164,6 +201,46 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
+    # Admin/mod commands to manage submitted questions
+    if content.startswith("!listquestions"):
+        if not is_admin_or_mod(message.author):
+            await message.channel.send("❌ You don't have permission to do that.")
+            return
+
+        if not submitted_questions:
+            await message.channel.send("No submitted questions found.")
+            return
+
+        chunks = [submitted_questions[i:i+10] for i in range(0, len(submitted_questions), 10)]
+        for chunk in chunks:
+            lines = [f"ID: {q['id']} — Question: {q['question']}" for q in chunk]
+            await message.channel.send("\n".join(lines))
+        return
+
+    if content.startswith("!removequestion"):
+        if not is_admin_or_mod(message.author):
+            await message.channel.send("❌ You don't have permission to do that.")
+            return
+
+        parts = content.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.channel.send("Usage: !removequestion <question_id>")
+            return
+        qid = parts[1].strip()
+
+        global submitted_questions
+        before_count = len(submitted_questions)
+        submitted_questions = [q for q in submitted_questions if q.get("id") != qid]
+        after_count = len(submitted_questions)
+
+        if before_count == after_count:
+            await message.channel.send(f"❌ No question found with ID: {qid}")
+            return
+
+        save_json(QUESTIONS_FILE, submitted_questions)
+        await message.channel.send(f"✅ Removed question with ID: {qid}")
+        return
+
     # Commands: run commands, do NOT delete command messages, do NOT count as guesses
     if content == "!score":
         score = scores.get(user_id, 0)
@@ -211,9 +288,9 @@ async def on_message(message):
         if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
             correct_users.add(user_id)
             # Award point only once per user per riddle
-            if user_id not in scores:
+            if scores.get(user_id) is None:
                 scores[user_id] = 0
-            if user_id not in correct_users or scores[user_id] == 0:
+            if user_id not in correct_users:
                 scores[user_id] = max(0, scores.get(user_id, 0) + 1)
                 streaks[user_id] = streaks.get(user_id, 0) + 1
                 save_all_scores()
@@ -228,6 +305,9 @@ async def on_message(message):
             return
         else:
             remaining = 5 - guess_attempts[user_id]
+            hours, minutes = get_time_until_reveal()
+            countdown_msg = f"⏳ Answer will be revealed in {hours}h {minutes}m."
+
             # On last incorrect guess warn about point loss on next guess
             if remaining == 0:
                 # Deduct 1 point but never below zero
@@ -235,15 +315,15 @@ async def on_message(message):
                 streaks[user_id] = 0  # reset streak on failure
                 save_all_scores()
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point.\n{countdown_msg}"
                 )
             elif remaining == 1:
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point."
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point.\n{countdown_msg}"
                 )
             else:
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining).\n{countdown_msg}"
                 )
 
             try:
@@ -252,28 +332,12 @@ async def on_message(message):
                 pass
             return
 
-@tree.command(name="submitriddle", description="Submit a new riddle")
-async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
-    user_id = str(interaction.user.id)
-    if not question.strip() or not answer.strip():
-        await interaction.response.send_message("\u274c Please provide both a question and an answer.", ephemeral=True)
-        return
-    new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-    submitted_questions.append({
-        "id": new_id,
-        "question": question.strip(),
-        "answer": answer.strip(),
-        "submitter_id": user_id
-    })
-    save_json(QUESTIONS_FILE, submitted_questions)
-    await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
-
 @tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
-• `/submitriddle` – Submit a new riddle.
 • `!score` – View your score and rank.
+• `/submitriddle` – Submit a new riddle.
 • `!leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
 """
@@ -351,23 +415,4 @@ async def show_leaderboard(channel, user_id):
     top_score = sorted_scores[0][1] if sorted_scores else 0
     top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
 
-    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start + 1):
-        user = await client.fetch_user(int(uid))
-        streak = streaks.get(uid, 0)
-        rank = get_rank(score, streak)
-        extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
-        embed.add_field(
-            name=f"{i}. {user.display_name}",
-            value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}{extra}",
-            inline=False
-        )
-
-    embed.set_footer(text="Use !leaderboard again to refresh")
-    await channel.send(embed=embed)
-
-if __name__ == "__main__":
-    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-    if not TOKEN:
-        print("Error: DISCORD_BOT_TOKEN environment variable not set.")
-        exit(1)
-    client.run(TOKEN)
+    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start
