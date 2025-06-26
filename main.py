@@ -8,8 +8,9 @@ import logging
 from discord.ext import tasks
 from datetime import time
 import os
+from discord import app_commands
 
-from keep_alive import keep_alive  # Optional for Railway
+from keep_alive import keep_alive  # Optional, remove if unused
 
 logging.basicConfig(level=logging.INFO)
 print("💡 Riddle bot is running")
@@ -44,13 +45,37 @@ except FileNotFoundError:
 # Intents
 intents = discord.Intents.default()
 intents.message_content = True
+
 client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
+
+def normalize_answer(ans: str) -> str:
+    ans = ans.lower().strip()
+    if ans.endswith("es"):
+        ans = ans[:-2]
+    elif ans.endswith("s"):
+        ans = ans[:-1]
+    return ans
 
 @client.event
 async def on_ready():
     print(f"✅ Logged in as {client.user}")
+    await tree.sync()
     post_riddle.start()
     reveal_answer.start()
+
+@tree.command(name="riddleoftheday", description="Show Riddle of the Day bot commands")
+async def riddle_commands(interaction: discord.Interaction):
+    commands_list = (
+        "**Riddle of the Day Bot Commands:**\n"
+        "• `/riddleoftheday` - Show this command list\n"
+        "• `!score` - Show your current score and streak\n"
+        "• `!leaderboard` - Show the leaderboard\n"
+        "• `!next` - Next leaderboard page\n"
+        "• `!prev` - Previous leaderboard page\n"
+        "\nSubmit your answer by typing it directly in the riddle channel."
+    )
+    await interaction.response.send_message(commands_list, ephemeral=True)
 
 def fetch_today_riddle():
     try:
@@ -95,7 +120,7 @@ async def reveal_answer():
         return
 
     channel = client.get_channel(CHANNEL_ID)
-    correct_answer = current_riddle["answer"].lower()
+    correct_answer = normalize_answer(current_riddle["answer"])
 
     if channel:
         if correct_users:
@@ -162,8 +187,8 @@ async def on_message(message):
 
     # Answer submission
     if current_riddle and message.channel.id == CHANNEL_ID:
-        user_answer = message.content.strip().lower()
-        correct_answer = current_riddle["answer"].strip().lower()
+        user_answer = normalize_answer(message.content)
+        correct_answer = normalize_answer(current_riddle["answer"])
 
         try:
             await message.delete()
@@ -206,6 +231,6 @@ async def show_leaderboard(channel, user_id):
     embed.set_footer(text="Use !next and !prev to navigate pages")
     await channel.send(embed=embed)
 
-# Keep-alive for Railway (optional)
+# Keep-alive for Railway or similar platforms (optional)
 keep_alive()
 client.run(TOKEN)
