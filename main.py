@@ -3,7 +3,7 @@ from discord.ext import tasks
 import asyncio
 import json
 import os
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timezone
 import random
 
 intents = discord.Intents.default()
@@ -15,8 +15,6 @@ tree = discord.app_commands.CommandTree(client)
 QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
-
-MODERATOR_ROLE_NAME = "Moderator"  # Change if your mod role is named differently
 
 # Load or initialize data stores
 def load_json(file):
@@ -66,7 +64,7 @@ def format_question_text(qdict):
     base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
     remaining = count_unused_questions()
     if remaining < 5:
-        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
+        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with !submitriddle to add it to the queue!"
     return base
 
 def count_unused_questions():
@@ -94,39 +92,6 @@ async def purge_channel_messages(channel):
     except Exception as e:
         print(f"Error during purge: {e}")
 
-def is_admin_or_mod(member: discord.Member):
-    if member.guild_permissions.administrator:
-        return True
-    for role in member.roles:
-        if role.name == MODERATOR_ROLE_NAME:
-            return True
-    return False
-
-def get_next_reveal_datetime():
-    # For today only (until 23:00 UTC or 1:00 UTC depending on date)
-    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
-    # If today is the first day you want 1:00 UTC reveal, otherwise 23:00 UTC
-    # Let's assume "today" means the date of the script run
-    reveal_hour_today = 1  # 1:00 UTC
-    reveal_hour_after_today = 23  # 23:00 UTC starting tomorrow
-
-    reveal_time_today = now_utc.replace(hour=reveal_hour_today, minute=0, second=0, microsecond=0)
-    if now_utc < reveal_time_today:
-        return reveal_time_today
-    else:
-        # Next day at 23:00 UTC
-        next_day = (now_utc + timedelta(days=1)).replace(hour=reveal_hour_after_today, minute=0, second=0, microsecond=0)
-        return next_day
-
-def get_time_until_reveal():
-    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
-    reveal_time = get_next_reveal_datetime()
-    diff = reveal_time - now_utc
-    total_seconds = int(diff.total_seconds())
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, _ = divmod(remainder, 60)
-    return hours, minutes
-
 @client.event
 async def on_ready():
     global purged_on_startup, current_riddle, current_answer_revealed, correct_users, guess_attempts
@@ -143,12 +108,10 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
-            # Reset riddle state so the bot knows to start fresh
             current_riddle = None
             current_answer_revealed = False
             correct_users.clear()
             guess_attempts.clear()
-            # Post the initial riddle right after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -191,57 +154,13 @@ async def on_message(message):
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if message.channel.id != channel_id:
-        # Outside designated channel, allow commands but no guess processing or deletion
         if message.content.startswith("!"):
-            # Let commands run outside channel but do not delete or process guesses
             return
-        # Outside channel, ignore guesses
         return
 
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Admin/mod commands to manage submitted questions
-    if content.startswith("!listquestions"):
-        if not is_admin_or_mod(message.author):
-            await message.channel.send("❌ You don't have permission to do that.")
-            return
-
-        if not submitted_questions:
-            await message.channel.send("No submitted questions found.")
-            return
-
-        chunks = [submitted_questions[i:i+10] for i in range(0, len(submitted_questions), 10)]
-        for chunk in chunks:
-            lines = [f"ID: {q['id']} — Question: {q['question']}" for q in chunk]
-            await message.channel.send("\n".join(lines))
-        return
-
-    if content.startswith("!removequestion"):
-        if not is_admin_or_mod(message.author):
-            await message.channel.send("❌ You don't have permission to do that.")
-            return
-
-        parts = content.split(maxsplit=1)
-        if len(parts) < 2:
-            await message.channel.send("Usage: !removequestion <question_id>")
-            return
-        qid = parts[1].strip()
-
-        global submitted_questions
-        before_count = len(submitted_questions)
-        submitted_questions = [q for q in submitted_questions if q.get("id") != qid]
-        after_count = len(submitted_questions)
-
-        if before_count == after_count:
-            await message.channel.send(f"❌ No question found with ID: {qid}")
-            return
-
-        save_json(QUESTIONS_FILE, submitted_questions)
-        await message.channel.send(f"✅ Removed question with ID: {qid}")
-        return
-
-    # Commands: run commands, do NOT delete command messages, do NOT count as guesses
     if content == "!score":
         score = scores.get(user_id, 0)
         streak = streaks.get(user_id, 0)
@@ -256,14 +175,14 @@ async def on_message(message):
         await show_leaderboard(message.channel, user_id)
         return
 
-    # Guessing logic inside the designated channel only
+    if content.startswith("!submitriddle "):
+        # We removed !submitriddle command per previous instructions, so ignore
+        return
+
     if current_riddle and not current_answer_revealed:
-        # Check if user already answered correctly
         if user_id in correct_users:
             if content.startswith("!"):
-                # Allow commands even if user already guessed correctly
                 return
-            # Delete any further guesses after correct answer without penalty
             try:
                 await message.delete()
             except Exception:
@@ -284,7 +203,6 @@ async def on_message(message):
         guess = content.lower()
         correct_answer = current_riddle["answer"].lower()
 
-        # Accept minor plural (simple rstrip s) as correct
         if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
             correct_users.add(user_id)
             # Award point only once per user per riddle
@@ -294,6 +212,8 @@ async def on_message(message):
                 scores[user_id] = max(0, scores.get(user_id, 0) + 1)
                 streaks[user_id] = streaks.get(user_id, 0) + 1
                 save_all_scores()
+            else:
+                pass
 
             await message.channel.send(
                 f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0)}"
@@ -302,28 +222,32 @@ async def on_message(message):
                 await message.delete()
             except Exception:
                 pass
+
+            # Show countdown for answer reveal
+            now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+            reveal_time = get_today_reveal_time()
+            delta = reveal_time - now_utc
+            if delta.total_seconds() > 0:
+                hours, remainder = divmod(int(delta.total_seconds()), 3600)
+                minutes = remainder // 60
+                await message.channel.send(f"⏳ The answer will be revealed in {hours} hour(s) and {minutes} minute(s).")
             return
         else:
             remaining = 5 - guess_attempts[user_id]
-            hours, minutes = get_time_until_reveal()
-            countdown_msg = f"⏳ Answer will be revealed in {hours}h {minutes}m."
-
-            # On last incorrect guess warn about point loss on next guess
             if remaining == 0:
-                # Deduct 1 point but never below zero
                 scores[user_id] = max(0, scores.get(user_id, 0) - 1)
-                streaks[user_id] = 0  # reset streak on failure
+                streaks[user_id] = 0
                 save_all_scores()
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point.\n{countdown_msg}"
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
                 )
             elif remaining == 1:
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point.\n{countdown_msg}"
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point."
                 )
             else:
                 await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining).\n{countdown_msg}"
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
                 )
 
             try:
@@ -337,11 +261,26 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
 • `!score` – View your score and rank.
-• `/submitriddle` – Submit a new riddle.
 • `!leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
+
+def get_today_reveal_time():
+    now = datetime.utcnow()
+    # For today (if today is deployment day), reveal at 1:00 UTC
+    # Starting tomorrow, reveal at 23:00 UTC
+    reveal_hour = 1
+    reveal_minute = 0
+    today_date = now.date()
+    reveal_time = datetime(today_date.year, today_date.month, today_date.day, reveal_hour, reveal_minute, tzinfo=timezone.utc)
+    if now > reveal_time:
+        # If time has passed today, reveal time is 23:00 UTC next day
+        reveal_time = datetime(today_date.year, today_date.month, today_date.day, 23, 0, tzinfo=timezone.utc)
+        if now > reveal_time:
+            # Already past 23:00 UTC today, reveal time is 23:00 UTC tomorrow
+            reveal_time = reveal_time + timedelta(days=1)
+    return reveal_time
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
@@ -415,4 +354,23 @@ async def show_leaderboard(channel, user_id):
     top_score = sorted_scores[0][1] if sorted_scores else 0
     top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
 
-    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start
+    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start + 1):
+        user = await client.fetch_user(int(uid))
+        streak = streaks.get(uid, 0)
+        rank = get_rank(score, streak)
+        extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
+        embed.add_field(
+            name=f"{i}. {user.display_name}",
+            value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}{extra}",
+            inline=False
+        )
+
+    embed.set_footer(text="Use !leaderboard again to refresh")
+    await channel.send(embed=embed)
+
+if __name__ == "__main__":
+    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+    if not TOKEN:
+        print("Error: DISCORD_BOT_TOKEN environment variable not set.")
+        exit(1)
+    client.run(TOKEN)
