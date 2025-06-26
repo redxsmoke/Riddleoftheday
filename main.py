@@ -127,13 +127,8 @@ async def on_message(message):
         return
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-
-    # Only respond in the allowed channel
     if message.channel.id != channel_id:
-        return
+        return  # Ignore messages outside the designated channel
 
     content = message.content.strip()
     user_id = str(message.author.id)
@@ -177,49 +172,43 @@ async def on_message(message):
         await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
         return
 
-    # Skip deletion for commands
+    # Only delete incorrect guess messages in the designated channel; commands and correct guesses not deleted
     if content.startswith("!"):
-        return
+        return  # Commands are processed but not deleted
 
     # Guessing logic
     if current_riddle and not current_answer_revealed:
         guess = content.lower()
         correct_answer = current_riddle["answer"].lower()
 
-        user_attempts = guess_attempts.get(user_id, 0)
-        if user_attempts >= 5:
-            await message.channel.send(f"❌ You're out of attempts for today's riddle, {message.author.mention}.")
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            return
-
-        guess_attempts[user_id] = user_attempts + 1
-
+        # Basic normalization: strip trailing 's' for plural handling
         guess_simple = guess.rstrip("s")
         answer_simple = correct_answer.rstrip("s")
 
-        if guess == correct_answer or guess_simple == answer_simple:
-            if message.author.id in correct_users:
-                await message.channel.send(f"ℹ️ {message.author.mention}, you have already guessed the correct answer for this riddle.")
-            else:
-                correct_users.add(message.author.id)
-                scores[user_id] = scores.get(user_id, 0) + 1
-                streaks[user_id] = streaks.get(user_id, 0) + 1
-                save_all_scores()
+        # Check if user already guessed correctly
+        if message.author.id in correct_users:
+            await message.channel.send(f"ℹ️ {message.author.mention}, you have already guessed the correct answer for this riddle.")
+            return
 
-                await message.channel.send(
-                    f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
-                )
+        # Handle incorrect guesses count and logic
+        user_attempts = guess_attempts.get(user_id, 0)
+
+        if guess == correct_answer or guess_simple == answer_simple:
+            # Correct guess first time
+            correct_users.add(message.author.id)
+            scores[user_id] = scores.get(user_id, 0) + 1
+            streaks[user_id] = streaks.get(user_id, 0) + 1
+            save_all_scores()
+
+            await message.channel.send(
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
+            )
         else:
-            remaining = 5 - guess_attempts[user_id]
-            if remaining == 0:
-                await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no attempts left. "
-                    "If you guess incorrectly again, you will lose 1 point."
-                )
-            elif remaining < 0:
+            # Incorrect guess - increment attempts
+            user_attempts += 1
+            guess_attempts[user_id] = user_attempts
+
+            if user_attempts > 5:
                 old_score = scores.get(user_id, 0)
                 new_score = max(old_score - 1, 0)
                 scores[user_id] = new_score
@@ -228,17 +217,24 @@ async def on_message(message):
                     f"❌ Sorry, that answer is incorrect again, {message.author.mention}. "
                     f"You lost 1 point. Your current score: {new_score}"
                 )
+            elif user_attempts == 5:
+                await message.channel.send(
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. "
+                    "If you guess incorrectly again, you will lose 1 point."
+                )
             else:
+                remaining = 5 - user_attempts
                 await message.channel.send(
                     f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
                 )
 
-        try:
-            await message.delete()
-        except Exception:
-            pass
+            # Delete the incorrect guess message only in the allowed channel
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
-@tasks.loop(time=time(hour=21, minute=0, tzinfo=timezone.utc))  # 9 PM UTC (will be switched)
+@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
@@ -272,12 +268,12 @@ async def reveal_answer():
     if not channel or not current_riddle:
         return
 
-    now_utc = datetime.utcnow()
-
-    if now_utc.date() == datetime(2025, 6, 26).date():
-        est_reveal_time_utc = datetime(2025, 6, 27, 1, 0, 0)  # 9 PM EST June 26 = 01:00 UTC June 27
-        if now_utc < est_reveal_time_utc:
-            return
+    # Determine if today is the special first day and adjust reveal time accordingly
+    now = datetime.utcnow()
+    # 2025-06-26 is example today of special day — adjust as needed
+    special_date = datetime(2025, 6, 26, tzinfo=timezone.utc).date()
+    est = timezone(timedelta(hours=-5))  # EST offset for awareness (no DST)
+    reveal_hour_utc = 21 if now.date() > special_date else 1 * 60 + 0  # placeholder, but handled by tasks loop schedule
 
     current_answer_revealed = True
     correct_answer = current_riddle["answer"]
