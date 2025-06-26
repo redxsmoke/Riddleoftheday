@@ -65,7 +65,7 @@ def format_question_text(qdict):
     base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
     remaining = count_unused_questions()
     if remaining < 5:
-        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with !submit_riddle to add it to the queue!"
+        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with !submitriddle to add it to the queue!"
     return base
 
 def count_unused_questions():
@@ -87,8 +87,6 @@ def save_all_scores():
 async def purge_channel_messages(channel):
     print(f"Purging all messages in channel {channel.name} ({channel.id}) on startup...")
     try:
-        def is_not_pinned(m): 
-            return not m.pinned
         async for message in channel.history(limit=None):
             if not message.pinned:
                 try:
@@ -123,33 +121,6 @@ async def on_ready():
     post_riddle.start()
     reveal_answer.start()
 
-async def post_special_riddle():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts
-
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found.")
-        return
-
-    current_riddle = {
-        "id": "manual_egg",
-        "question": "What has to be broken before you can use it?",
-        "answer": "Egg",
-        "submitter_id": None
-    }
-
-    current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-
-    question_text = format_question_text(current_riddle)
-    await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
-
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -179,17 +150,18 @@ async def on_message(message):
             await show_leaderboard(message.channel, user_id)
             return
 
-        if content.startswith("!submit_riddle "):
+        if content.lower().startswith("!submitriddle "):
             try:
-                _, rest = content.split(" ", 1)
-                question, answer = rest.split("|", 1)
+                # Remove command prefix and strip
+                cmd_content = content[len("!submitriddle "):].strip()
+                question, answer = cmd_content.split("|", 1)
                 question = question.strip()
                 answer = answer.strip()
                 if not question or not answer:
-                    await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
+                    await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'. Example:\n!submitriddle What is 2+2? | 4")
                     return
             except Exception:
-                await message.channel.send("\u274c Invalid format. Use: `!submit_riddle Your question here | The answer here`")
+                await message.channel.send("\u274c Invalid format. Use: `!submitriddle Your question here | The answer here`")
                 return
 
             new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
@@ -327,7 +299,7 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
 • `!score` – View your score and rank.
-• `!submit_riddle question | answer` – Submit a new riddle.
+• `!submitriddle question | answer` – Submit a new riddle.
 • `!leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
 """
