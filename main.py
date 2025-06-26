@@ -16,13 +16,10 @@ def get_rank(score, streak):
     
     # Special streak ranks if streak >= 3:
     if streak >= 3:
-        rank = "🔥 Streak Samurai (Solved {} riddles consecutively)".format(streak)
-    # Top solver (you could detect top scorer in leaderboard and append a title)
-    # For simplicity, you can check top scorer rank in leaderboard code later
-
+        rank = f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
     return rank
 
-# Update your !score command handler (in on_message):
+# Inside your async def on_message(message): handler
 
 if msg == "!score":
     score = scores.get(user_id, 0)
@@ -33,7 +30,7 @@ if msg == "!score":
     )
     return
 
-# Update show_leaderboard to display rank per user:
+# Your show_leaderboard function stays async
 
 async def show_leaderboard(channel, user_id):
     page = leaderboard_pages.get(user_id, 0)
@@ -48,7 +45,6 @@ async def show_leaderboard(channel, user_id):
     )
 
     start = page * 10
-    # Determine the top scorer id (for "Chopstick Champ" title)
     top_score = sorted_scores[0][1] if sorted_scores else 0
     top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
 
@@ -56,11 +52,8 @@ async def show_leaderboard(channel, user_id):
         user = await client.fetch_user(int(uid))
         streak = streaks.get(uid, 0)
         rank = get_rank(score, streak)
-
-        # Add "Chopstick Champ" title to top scorer(s)
         if uid in top_scorers:
             rank += " 👑 Chopstick Champ (Top Solver)"
-
         embed.add_field(
             name=f"{i}. {user.display_name}",
             value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}",
@@ -70,7 +63,7 @@ async def show_leaderboard(channel, user_id):
     embed.set_footer(text="Use !next and !prev to navigate pages")
     await channel.send(embed=embed)
 
-# Update the reveal_answer to announce rank/title for each user:
+# In your reveal_answer task, keep this code inside the async function that runs the reveal:
 
 if correct_users:
     lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
