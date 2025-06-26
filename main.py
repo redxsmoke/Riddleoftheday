@@ -86,8 +86,48 @@ async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
     await tree.sync()
+
+    # Schedule today's special riddle for 21:05 UTC (5:05 PM EST)
+    now = datetime.utcnow()
+    target_time = now.replace(hour=21, minute=5, second=0, microsecond=0)
+    if now < target_time:
+        delay = (target_time - now).total_seconds()
+        print(f"⏳ Scheduling today’s riddle in {int(delay)} seconds...")
+        asyncio.create_task(schedule_today_riddle(delay))
+    else:
+        print("⚠️ Missed today’s special riddle post window.")
+
     post_riddle.start()
     reveal_answer.start()
+
+async def schedule_today_riddle(delay):
+    await asyncio.sleep(delay)
+
+    global current_riddle, current_answer_revealed, correct_users
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Channel not found.")
+        return
+
+    # Hardcoded riddle for today
+    current_riddle = {
+        "id": "manual_egg",
+        "question": "What has to be broken before you can use it?",
+        "answer": "Egg",
+        "submitter_id": None
+    }
+
+    current_answer_revealed = False
+    correct_users = set()
+
+    question_text = format_question_text(current_riddle)
+    await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
 
 @client.event
 async def on_message(message):
