@@ -11,12 +11,10 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
-# Files
 QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
-# Load or initialize data stores
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -38,6 +36,16 @@ correct_users = set()
 leaderboard_pages = {}
 guess_attempts = {}
 
+@tree.command(name="riddleofthedaycommands", description="View all Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands = """
+**Available Riddle Bot Commands:**
+• `!score` – View your score and rank.
+• `!submit_riddle question | answer` – Submit a new riddle.
+• `!leaderboard` – Show the top solvers.
+• Type your guess to try solving the riddle!
+"""
+    await interaction.response.send_message(commands, ephemeral=True)
 
 def get_rank(score, streak):
     if score <= 5:
@@ -62,13 +70,10 @@ def get_top_scorers():
 
 def format_question_text(qdict):
     base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
-    remaining = count_unused_questions()
+    remaining = len([q for q in submitted_questions if q.get("id") not in used_question_ids])
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with !submit_riddle to add it to the queue!"
     return base
-
-def count_unused_questions():
-    return len([q for q in submitted_questions if q.get("id") not in used_question_ids])
 
 def pick_next_riddle():
     unused = [q for q in submitted_questions if q.get("id") not in used_question_ids and q.get("id") is not None]
@@ -130,50 +135,11 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Commands
-    if content == "!score":
-        score = scores.get(user_id, 0)
-        streak = streaks.get(user_id, 0)
-        rank = get_rank(score, streak)
-        await message.channel.send(
-            f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
-        )
-        return
-
-    if content == "!leaderboard":
-        leaderboard_pages[user_id] = 0
-        await show_leaderboard(message.channel, user_id)
-        return
-
-    if content.startswith("!submit_riddle "):
-        try:
-            _, rest = content.split(" ", 1)
-            question, answer = rest.split("|", 1)
-            question = question.strip()
-            answer = answer.strip()
-            if not question or not answer:
-                await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
-                return
-        except Exception:
-            await message.channel.send("\u274c Invalid format. Use: `!submit_riddle Your question here | The answer here`")
-            return
-
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-        submitted_questions.append({
-            "id": new_id,
-            "question": question,
-            "answer": answer,
-            "submitter_id": user_id
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
-        await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
-        return
-
-    # Skip commands from deletion
     if content.startswith("!"):
         return
 
-    # Guessing logic
+    global current_riddle, current_answer_revealed
+
     if current_riddle and not current_answer_revealed:
         guess = content.lower()
         correct_answer = current_riddle["answer"].lower()
@@ -183,7 +149,7 @@ async def on_message(message):
             await message.channel.send(f"❌ You're out of attempts for today's riddle, {message.author.mention}.")
             try:
                 await message.delete()
-            except Exception:
+            except:
                 pass
             return
 
@@ -195,18 +161,20 @@ async def on_message(message):
             streaks[user_id] = streaks.get(user_id, 0) + 1
             save_all_scores()
 
-            await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
-            )
+            await message.channel.send(f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}")
         else:
             remaining = 5 - guess_attempts[user_id]
-            await message.channel.send(
-                f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
-            )
+            if remaining == 0:
+                scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+                streaks[user_id] = 0
+                save_all_scores()
+                await message.channel.send(f"❌ Sorry, {message.author.mention}, you're out of guesses. 1 point has been deducted from your score.")
+            else:
+                await message.channel.send(f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining).")
 
         try:
             await message.delete()
-        except Exception:
+        except:
             pass
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
@@ -259,41 +227,11 @@ async def reveal_answer():
             user = await client.fetch_user(uid)
             rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
             extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
-            lines.append(f"\u2022 {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
+            lines.append(f"• {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
         lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
         await channel.send("\n".join(lines))
     else:
         await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
-
-async def show_leaderboard(channel, user_id):
-    page = leaderboard_pages.get(user_id, 0)
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
-    page = min(page, total_pages - 1)
-
-    embed = discord.Embed(
-        title=f"🏆 Riddle Leaderboard (Page {page + 1}/{total_pages})",
-        description="Top riddle solvers by total correct guesses",
-        color=discord.Color.gold()
-    )
-
-    start = page * 10
-    top_score = sorted_scores[0][1] if sorted_scores else 0
-    top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
-
-    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start + 1):
-        user = await client.fetch_user(int(uid))
-        streak = streaks.get(uid, 0)
-        rank = get_rank(score, streak)
-        extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
-        embed.add_field(
-            name=f"{i}. {user.display_name}",
-            value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}{extra}",
-            inline=False
-        )
-
-    embed.set_footer(text="Use !leaderboard again to refresh")
-    await channel.send(embed=embed)
 
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
