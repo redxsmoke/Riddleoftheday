@@ -24,8 +24,11 @@ def load_json(file):
     return [] if file == QUESTIONS_FILE else {}
 
 def save_json(file, data):
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    try:
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving {file}: {e}")
 
 submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
@@ -64,7 +67,7 @@ def format_question_text(qdict):
     base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
     remaining = count_unused_questions()
     if remaining < 5:
-        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
+        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with the proper system soon!"
     return base
 
 def count_unused_questions():
@@ -98,16 +101,7 @@ async def on_ready():
 
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
-
-    # Optionally sync only to a guild for fast command registration during dev
-    GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-    if GUILD_ID:
-        guild_obj = discord.Object(id=int(GUILD_ID))
-        await tree.sync(guild=guild_obj)
-        print(f"Synced commands to guild {GUILD_ID}")
-    else:
-        await tree.sync()
-        print("Synced global commands")
+    await tree.sync()
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
@@ -117,12 +111,10 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
-            # Reset riddle state so the bot knows to start fresh
-            current_riddle = None
-            current_answer_revealed = False
+            # Reset today's guesses and correct users (not scores)
             correct_users.clear()
             guess_attempts.clear()
-            # Post the initial riddle right after purge
+            # Post initial riddle after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -158,6 +150,22 @@ async def post_special_riddle():
     question_text = format_question_text(current_riddle)
     await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
 
+def get_answer_reveal_time():
+    now = datetime.utcnow()
+    reveal_time_today = now.replace(hour=1, minute=0, second=0, microsecond=0)
+    if now < reveal_time_today:
+        return reveal_time_today
+    reveal_time_tomorrow = (now + timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
+    return reveal_time_tomorrow
+
+def get_time_until_reveal():
+    reveal_time = get_answer_reveal_time()
+    now = datetime.utcnow()
+    delta = reveal_time - now
+    hours = delta.seconds // 3600
+    minutes = (delta.seconds % 3600) // 60
+    return hours, minutes
+
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -167,9 +175,7 @@ async def on_message(message):
     if message.channel.id != channel_id:
         # Outside designated channel, allow commands but no guess processing or deletion
         if message.content.startswith("!"):
-            # Let commands run outside channel but do not delete or process guesses
             return
-        # Outside channel, ignore guesses
         return
 
     content = message.content.strip()
@@ -190,32 +196,6 @@ async def on_message(message):
         await show_leaderboard(message.channel, user_id)
         return
 
-    if content.startswith("!submitriddle "):
-        try:
-            _, rest = content.split(" ", 1)
-            question, answer = rest.split("|", 1)
-            question = question.strip()
-            answer = answer.strip()
-            if not question or not answer:
-                await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
-                return
-        except Exception:
-            await message.channel.send("\u274c Invalid format. Use: `!submitriddle Your question here | The answer here`")
-            return
-
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-        submitted_questions.append({
-            "id": new_id,
-            "question": question,
-            "answer": answer,
-            "submitter_id": user_id
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
-        await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
-        return
-
-    # Slash command /riddleofthedaycommands is handled separately and will not trigger here
-
     # Guessing logic inside the designated channel only
     if current_riddle and not current_answer_revealed:
         # Check if user already answered correctly
@@ -223,7 +203,6 @@ async def on_message(message):
             if content.startswith("!"):
                 # Allow commands even if user already guessed correctly
                 return
-            # Delete any further guesses after correct answer without penalty
             try:
                 await message.delete()
             except Exception:
@@ -256,7 +235,7 @@ async def on_message(message):
                 save_all_scores()
 
             await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0)}"
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0]}"
             )
             try:
                 await message.delete()
@@ -265,11 +244,9 @@ async def on_message(message):
             return
         else:
             remaining = 5 - guess_attempts[user_id]
-            # On last incorrect guess warn about point loss on next guess
             if remaining == 0:
-                # Deduct 1 point but never below zero
                 scores[user_id] = max(0, scores.get(user_id, 0) - 1)
-                streaks[user_id] = 0  # reset streak on failure
+                streaks[user_id] = 0
                 save_all_scores()
                 await message.channel.send(
                     f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
@@ -293,33 +270,11 @@ async def on_message(message):
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
-• `/score` – View your score and rank.
-• `/submitriddle` – Submit a new riddle using the modal form.
-• `/leaderboard` – Show the top solvers.
+• `!score` – View your score and rank.
+• `!leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
-
-# Modal for /submitriddle slash command to get question & answer from user
-class SubmitRiddleModal(discord.ui.Modal, title="Submit a Riddle"):
-    question = discord.ui.TextInput(label="Question", style=discord.TextStyle.paragraph, required=True, max_length=200)
-    answer = discord.ui.TextInput(label="Answer", style=discord.TextStyle.short, required=True, max_length=100)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-        submitted_questions.append({
-            "id": new_id,
-            "question": self.question.value.strip(),
-            "answer": self.answer.value.strip(),
-            "submitter_id": user_id
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
-        await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
-
-@tree.command(name="submitriddle", description="Submit a new riddle using a form")
-async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.send_modal(SubmitRiddleModal())
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
