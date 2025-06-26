@@ -24,11 +24,8 @@ def load_json(file):
     return [] if file == QUESTIONS_FILE else {}
 
 def save_json(file, data):
-    try:
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving {file}: {e}")
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
@@ -67,7 +64,7 @@ def format_question_text(qdict):
     base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
     remaining = count_unused_questions()
     if remaining < 5:
-        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with the proper system soon!"
+        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
     return base
 
 def count_unused_questions():
@@ -111,10 +108,10 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
-            # Reset today's guesses and correct users (not scores)
+            current_riddle = None
+            current_answer_revealed = False
             correct_users.clear()
             guess_attempts.clear()
-            # Post initial riddle after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -150,22 +147,6 @@ async def post_special_riddle():
     question_text = format_question_text(current_riddle)
     await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
 
-def get_answer_reveal_time():
-    now = datetime.utcnow()
-    reveal_time_today = now.replace(hour=1, minute=0, second=0, microsecond=0)
-    if now < reveal_time_today:
-        return reveal_time_today
-    reveal_time_tomorrow = (now + timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
-    return reveal_time_tomorrow
-
-def get_time_until_reveal():
-    reveal_time = get_answer_reveal_time()
-    now = datetime.utcnow()
-    delta = reveal_time - now
-    hours = delta.seconds // 3600
-    minutes = (delta.seconds % 3600) // 60
-    return hours, minutes
-
 @client.event
 async def on_message(message):
     if message.author.bot:
@@ -175,7 +156,9 @@ async def on_message(message):
     if message.channel.id != channel_id:
         # Outside designated channel, allow commands but no guess processing or deletion
         if message.content.startswith("!"):
+            # Let commands run outside channel but do not delete or process guesses
             return
+        # Outside channel, ignore guesses
         return
 
     content = message.content.strip()
@@ -203,6 +186,7 @@ async def on_message(message):
             if content.startswith("!"):
                 # Allow commands even if user already guessed correctly
                 return
+            # Delete any further guesses after correct answer without penalty
             try:
                 await message.delete()
             except Exception:
@@ -229,13 +213,13 @@ async def on_message(message):
             # Award point only once per user per riddle
             if user_id not in scores:
                 scores[user_id] = 0
-            if user_id not in correct_users:
+            if user_id not in correct_users or scores[user_id] == 0:
                 scores[user_id] = max(0, scores.get(user_id, 0) + 1)
                 streaks[user_id] = streaks.get(user_id, 0) + 1
                 save_all_scores()
 
             await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0]}"
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0)}"
             )
             try:
                 await message.delete()
@@ -244,9 +228,11 @@ async def on_message(message):
             return
         else:
             remaining = 5 - guess_attempts[user_id]
+            # On last incorrect guess warn about point loss on next guess
             if remaining == 0:
+                # Deduct 1 point but never below zero
                 scores[user_id] = max(0, scores.get(user_id, 0) - 1)
-                streaks[user_id] = 0
+                streaks[user_id] = 0  # reset streak on failure
                 save_all_scores()
                 await message.channel.send(
                     f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
@@ -266,10 +252,27 @@ async def on_message(message):
                 pass
             return
 
+@tree.command(name="submitriddle", description="Submit a new riddle")
+async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
+    user_id = str(interaction.user.id)
+    if not question.strip() or not answer.strip():
+        await interaction.response.send_message("\u274c Please provide both a question and an answer.", ephemeral=True)
+        return
+    new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+    submitted_questions.append({
+        "id": new_id,
+        "question": question.strip(),
+        "answer": answer.strip(),
+        "submitter_id": user_id
+    })
+    save_json(QUESTIONS_FILE, submitted_questions)
+    await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
+
 @tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
+• `/submitriddle` – Submit a new riddle.
 • `!score` – View your score and rank.
 • `!leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
