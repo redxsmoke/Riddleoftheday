@@ -38,6 +38,8 @@ correct_users = set()
 leaderboard_pages = {}
 guess_attempts = {}
 
+purged_on_startup = False  # To ensure purge runs only once per startup
+
 def get_rank(score, streak):
     if score <= 5:
         rank = "Sushi Newbie 🍽️"
@@ -82,11 +84,38 @@ def save_all_scores():
     save_json(SCORES_FILE, scores)
     save_json(STREAKS_FILE, streaks)
 
+async def purge_channel_messages(channel):
+    print(f"Purging all messages in channel {channel.name} ({channel.id}) on startup...")
+    try:
+        def is_not_pinned(m): 
+            return not m.pinned
+        async for message in channel.history(limit=None):
+            if not message.pinned:
+                try:
+                    await message.delete()
+                    await asyncio.sleep(0.1)  # slight delay to avoid rate limits
+                except Exception as e:
+                    print(f"Failed to delete message: {e}")
+        print("Purge complete.")
+    except Exception as e:
+        print(f"Error during purge: {e}")
+
 @client.event
 async def on_ready():
+    global purged_on_startup
+
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
     await tree.sync()
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+    else:
+        channel = client.get_channel(channel_id)
+        if channel and not purged_on_startup:
+            await purge_channel_messages(channel)
+            purged_on_startup = True
 
     if not current_riddle:
         await post_special_riddle()
@@ -95,7 +124,7 @@ async def on_ready():
     reveal_answer.start()
 
 async def post_special_riddle():
-    global current_riddle, current_answer_revealed, correct_users
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
