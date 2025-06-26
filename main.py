@@ -37,8 +37,7 @@ current_answer_revealed = False
 correct_users = set()
 leaderboard_pages = {}
 guess_attempts = {}
-
-purged_on_startup = False  # To ensure purge runs only once per startup
+purged_on_startup = False
 
 def get_rank(score, streak):
     if score <= 5:
@@ -85,22 +84,17 @@ def save_all_scores():
     save_json(STREAKS_FILE, streaks)
 
 async def purge_channel_messages(channel):
-    print(f"Purging all messages in channel {channel.name} ({channel.id}) on startup...")
+    print(f"Purging all messages in channel: {channel.name} ({channel.id}) for clean test")
     try:
         async for message in channel.history(limit=None):
-            if not message.pinned:
-                try:
-                    await message.delete()
-                    await asyncio.sleep(0.1)  # slight delay to avoid rate limits
-                except Exception as e:
-                    print(f"Failed to delete message: {e}")
-        print("Purge complete.")
+            await message.delete()
+        print("Channel purge complete.")
     except Exception as e:
         print(f"Error during purge: {e}")
 
 @client.event
 async def on_ready():
-    global purged_on_startup
+    global purged_on_startup, current_riddle, current_answer_revealed, correct_users, guess_attempts
 
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
@@ -114,6 +108,13 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
+            # Reset riddle state so the bot knows to start fresh
+            current_riddle = None
+            current_answer_revealed = False
+            correct_users.clear()
+            guess_attempts.clear()
+            # Post the initial riddle right after purge
+            await post_special_riddle()
 
     if not current_riddle:
         await post_special_riddle()
@@ -121,80 +122,104 @@ async def on_ready():
     post_riddle.start()
     reveal_answer.start()
 
+async def post_special_riddle():
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Channel not found.")
+        return
+
+    current_riddle = {
+        "id": "manual_egg",
+        "question": "What has to be broken before you can use it?",
+        "answer": "Egg",
+        "submitter_id": None
+    }
+
+    current_answer_revealed = False
+    correct_users = set()
+    guess_attempts.clear()
+
+    question_text = format_question_text(current_riddle)
+    await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
+
 @client.event
 async def on_message(message):
     if message.author.bot:
         return
 
-    content = message.content.strip()
-
-    # Ignore slash commands so they do not count as guesses or get deleted
-    if content.startswith("/"):
-        return await client.process_commands(message)
-
-    user_id = str(message.author.id)
-
-    # Commands (starting with !)
-    if content.startswith("!"):
-        if content == "!score":
-            score = scores.get(user_id, 0)
-            streak = streaks.get(user_id, 0)
-            rank = get_rank(score, streak)
-            await message.channel.send(
-                f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
-            )
-            return
-
-        if content == "!leaderboard":
-            leaderboard_pages[user_id] = 0
-            await show_leaderboard(message.channel, user_id)
-            return
-
-        if content.lower().startswith("!submitriddle "):
-            try:
-                # Remove command prefix and strip
-                cmd_content = content[len("!submitriddle "):].strip()
-                question, answer = cmd_content.split("|", 1)
-                question = question.strip()
-                answer = answer.strip()
-                if not question or not answer:
-                    await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'. Example:\n!submitriddle What is 2+2? | 4")
-                    return
-            except Exception:
-                await message.channel.send("\u274c Invalid format. Use: `!submitriddle Your question here | The answer here`")
-                return
-
-            new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-            submitted_questions.append({
-                "id": new_id,
-                "question": question,
-                "answer": answer,
-                "submitter_id": user_id
-            })
-            save_json(QUESTIONS_FILE, submitted_questions)
-            await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
-            return
-
-        # Commands should NOT be deleted or count as guesses
-        return
-
-    # Guessing logic - only in configured channel
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if message.channel.id != channel_id:
-        # Ignore all guessing logic outside the specified channel
+        # Outside designated channel, allow commands but no guess processing or deletion
+        if message.content.startswith("!"):
+            # Let commands run outside channel but do not delete or process guesses
+            return
+        # Outside channel, ignore guesses
         return
 
-    if current_riddle and not current_answer_revealed:
-        guess = content.lower()
-        correct_answer = current_riddle["answer"].lower()
+    content = message.content.strip()
+    user_id = str(message.author.id)
 
-        # Check if user already guessed correctly
+    # Commands: run commands, do NOT delete command messages, do NOT count as guesses
+    if content == "!score":
+        score = scores.get(user_id, 0)
+        streak = streaks.get(user_id, 0)
+        rank = get_rank(score, streak)
+        await message.channel.send(
+            f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
+        )
+        return
+
+    if content == "!leaderboard":
+        leaderboard_pages[user_id] = 0
+        await show_leaderboard(message.channel, user_id)
+        return
+
+    if content.startswith("!submitriddle "):
+        try:
+            _, rest = content.split(" ", 1)
+            question, answer = rest.split("|", 1)
+            question = question.strip()
+            answer = answer.strip()
+            if not question or not answer:
+                await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
+                return
+        except Exception:
+            await message.channel.send("\u274c Invalid format. Use: `!submitriddle Your question here | The answer here`")
+            return
+
+        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+        submitted_questions.append({
+            "id": new_id,
+            "question": question,
+            "answer": answer,
+            "submitter_id": user_id
+        })
+        save_json(QUESTIONS_FILE, submitted_questions)
+        await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
+        return
+
+    # Slash command /riddleofthedaycommands is handled separately and will not trigger here
+
+    # Guessing logic inside the designated channel only
+    if current_riddle and not current_answer_revealed:
+        # Check if user already answered correctly
         if user_id in correct_users:
-            await message.channel.send(f"⚠️ You have already guessed the correct answer, {message.author.mention}.")
+            if content.startswith("!"):
+                # Allow commands even if user already guessed correctly
+                return
+            # Delete any further guesses after correct answer without penalty
             try:
                 await message.delete()
             except Exception:
                 pass
+            await message.channel.send(f"✅ You have already guessed the correct answer, {message.author.mention}. No more guesses will be counted.")
             return
 
         user_attempts = guess_attempts.get(user_id, 0)
@@ -206,41 +231,72 @@ async def on_message(message):
                 pass
             return
 
-        # Check guess - accept small mispellings by ignoring trailing 's'
         guess_attempts[user_id] = user_attempts + 1
+        guess = content.lower()
+        correct_answer = current_riddle["answer"].lower()
 
+        # Accept minor plural (simple rstrip s) as correct
         if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
             correct_users.add(user_id)
-            scores[user_id] = scores.get(user_id, 0) + 1
-            streaks[user_id] = streaks.get(user_id, 0) + 1
-            save_all_scores()
+            # Award point only once per user per riddle
+            if scores.get(user_id, 0) == None:
+                scores[user_id] = 0
+            if user_id not in correct_users:
+                scores[user_id] = max(0, scores.get(user_id, 0) + 1)
+                streaks[user_id] = streaks.get(user_id, 0) + 1
+                save_all_scores()
+            else:
+                # User already got point for correct guess, no increment
+                pass
 
             await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores[user_id]}"
+                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0)}"
             )
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
         else:
             remaining = 5 - guess_attempts[user_id]
-            # Warn user on last guess
+            # On last incorrect guess warn about point loss on next guess
             if remaining == 0:
-                await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. This was your last guess and you will lose 1 point if you guess incorrectly again."
-                )
-                # Deduct 1 point but not below 0
-                scores[user_id] = max(scores.get(user_id, 0) - 1, 0)
+                # Deduct 1 point but never below zero
+                scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+                streaks[user_id] = 0  # reset streak on failure
                 save_all_scores()
+                await message.channel.send(
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
+                )
+            elif remaining == 1:
+                await message.channel.send(
+                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point."
+                )
             else:
                 await message.channel.send(
                     f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
                 )
 
-        try:
-            await message.delete()
-        except Exception:
-            pass
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return
+
+@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands = """
+**Available Riddle Bot Commands:**
+• `!score` – View your score and rank.
+• `!submitriddle question | answer` – Submit a new riddle.
+• `!leaderboard` – Show the top solvers.
+• Just type your guess to answer the riddle!
+"""
+    await interaction.response.send_message(commands, ephemeral=True)
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
         print("DISCORD_CHANNEL_ID not set.")
@@ -252,7 +308,7 @@ async def post_riddle():
 
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
-    correct_users.clear()
+    correct_users = set()
     guess_attempts.clear()
 
     question_text = format_question_text(current_riddle)
@@ -293,17 +349,6 @@ async def reveal_answer():
         await channel.send("\n".join(lines))
     else:
         await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
-
-@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands = """
-**Available Riddle Bot Commands:**
-• `!score` – View your score and rank.
-• `!submitriddle question | answer` – Submit a new riddle.
-• `!leaderboard` – Show the top solvers.
-• Just type your guess to answer the riddle!
-"""
-    await interaction.response.send_message(commands, ephemeral=True)
 
 async def show_leaderboard(channel, user_id):
     page = leaderboard_pages.get(user_id, 0)
