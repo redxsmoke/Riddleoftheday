@@ -87,9 +87,9 @@ async def on_ready():
     print("------")
     await tree.sync()
 
-    # Schedule today's special riddle for 21:05 UTC (5:05 PM EST)
+    # Schedule today's special riddle for 21:15 UTC (5:15 PM EST)
     now = datetime.utcnow()
-    target_time = now.replace(hour=21, minute=5, second=0, microsecond=0)
+    target_time = now.replace(hour=21, minute=15, second=0, microsecond=0)
     if now < target_time:
         delay = (target_time - now).total_seconds()
         print(f"⏳ Scheduling today’s riddle in {int(delay)} seconds...")
