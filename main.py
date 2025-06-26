@@ -96,7 +96,7 @@ def fetch_today_riddle():
         logging.error(f"❌ Exception fetching riddles: {e}")
     return None
 
-@tasks.loop(time=time(hour=15, minute=0))  # 3:00 PM UTC
+@tasks.loop(time=time(hour=19, minute=15))  # 7:15 PM UTC
 async def post_riddle():
     global current_riddle, correct_users
 
@@ -112,7 +112,7 @@ async def post_riddle():
     else:
         logging.warning("⚠️ Riddle or channel missing")
 
-@tasks.loop(time=time(hour=20, minute=0))  # 8:00 PM UTC
+@tasks.loop(time=time(hour=0, minute=0))  # 12:00 AM UTC
 async def reveal_answer():
     global current_riddle, correct_users
 
@@ -200,7 +200,7 @@ async def on_message(message):
 
         try:
             await message.channel.send(
-                f"{message.author.mention} ✅ Thanks for your submission! The answer will be revealed at 20:00 UTC.",
+                f"{message.author.mention} ✅ Thanks for your submission! The answer will be revealed at 00:00 UTC.",
                 delete_after=10
             )
         except:
