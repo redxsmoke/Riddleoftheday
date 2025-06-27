@@ -52,11 +52,11 @@ def save_all_scores():
     save_json(STREAKS_FILE, streaks)
 
 def get_rank(score, streak):
-    # Determine if user is Master Sushi Chef (top scorer) with sushi emoji 🍣
+    # Determine if user is Master Sushi Chef (top scorer)
     if scores:
         max_score = max(scores.values())
         if score == max_score and max_score > 0:
-            return "🍣 Master Sushi Chef (Top scorer)"
+            return "👑 Master Sushi Chef (Top scorer)"
     if streak >= 3:
         return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
     if score <= 5:
@@ -282,28 +282,60 @@ async def score(interaction: discord.Interaction):
         ephemeral=True
     )
 
+
+# --- Leaderboard with pagination ---
+
+class LeaderboardView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.page = 0
+
+    async def update_message(self, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("⛔ This pagination isn't for you.", ephemeral=True)
+            return
+        embed = await self.create_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    async def create_embed(self):
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+        page = max(0, min(self.page, total_pages - 1))
+        embed = discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})", color=discord.Color.gold())
+        start = page * 10
+        for i, (uid, sv) in enumerate(sorted_scores[start:start+10], start=start+1):
+            try:
+                user = await client.fetch_user(int(uid))
+                st = streaks.get(uid, 0)
+                embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv, st)}", inline=False)
+            except:
+                embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("⛔ Already at the first page.", ephemeral=True)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+        if self.page < total_pages - 1:
+            self.page += 1
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("⛔ Already at the last page.", ephemeral=True)
+
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    leaderboard_pages[uid] = 0
-    await show_leaderboard(interaction.channel, uid)
-    await interaction.response.send_message("📋 Showing leaderboard...", ephemeral=True)
-
-async def show_leaderboard(channel, user_id):
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
-    page = leaderboard_pages.get(user_id, 0)
-    page = min(page, total_pages - 1)
-    embed = discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})", color=discord.Color.gold())
-    start = page * 10
-    for i, (uid, sv) in enumerate(sorted_scores[start:start+10], start=start+1):
-        try:
-            user = await client.fetch_user(int(uid))
-            st = streaks.get(uid, 0)
-            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv, st)}", inline=False)
-        except:
-            embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
-    await channel.send(embed=embed)
+    view = LeaderboardView(interaction.user.id)
+    embed = await view.create_embed()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 @client.event
@@ -401,8 +433,10 @@ async def daily_purge():
 async def notify_upcoming_riddle():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if channel:
-        await channel.send("⏳ The next riddle will be posted soon!")
+    if not channel:
+        print("Channel not found for notify upcoming riddle.")
+        return
+    await channel.send("🕖 Riddle will be posted soon! Prepare your brain!")
 
 @tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
 async def post_riddle():
@@ -415,9 +449,9 @@ async def post_riddle():
 
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-    deducted_for_user.clear()
+    correct_users = set()
+    guess_attempts = {}
+    deducted_for_user = set()
 
     text = format_question_text(current_riddle)
     await channel.send(text)
@@ -427,77 +461,25 @@ async def reveal_answer():
     global current_answer_revealed
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if not channel or current_riddle is None:
+    if not channel or not current_riddle:
         return
-    answer = current_riddle["answer"]
-    await channel.send(f"🔔 The answer to riddle {current_riddle['id']} is: **{answer}**")
     current_answer_revealed = True
+    await channel.send(f"📢 The answer to riddle {current_riddle['id']} is: **{current_riddle['answer']}**")
 
-
-# --- /riddleofthedaycommands command ---
-@tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands_list = """
-**Available Riddle of the Day Commands:**
-
-• `/submitriddle` - Submit a new riddle via a form.
-• `/listquestions` - (Admin) List all submitted riddles.
-• `/removequestion` - (Admin) Remove a riddle by ID.
-• `/score` - View your current score and rank.
-• `/leaderboard` - Show the top solvers.
-• `/addpoints` - (Admin) Add a point to a user.
-• `/removepoint` - (Admin) Remove a point from a user.
-• `/ranks` - Show the rank descriptions.
-• `/riddleofthedaycommands` - Show this list of commands.
-"""
-    await interaction.response.send_message(commands_list, ephemeral=True)
-
-
-# --- /ranks command ---
-@tree.command(name="ranks", description="Show rank descriptions")
-async def ranks(interaction: discord.Interaction):
-    ranks_description = """
-**Riddle of the Day Ranks and Descriptions:**
-
-🍣 **Master Sushi Chef (Top scorer)**  
-Awarded to the user(s) with the highest score.
-
-🔥 **Streak Samurai**  
-Achieved by solving 3 or more riddles consecutively.
-
-Sushi Newbie 🍽️  
-For scores 0 to 5 points.
-
-Maki Novice 🍣  
-For scores between 6 and 15 points.
-
-Sashimi Skilled 🍤  
-For scores between 16 and 25 points.
-
-Brainy Botan 🧠  
-For scores between 26 and 50 points.
-
-Sushi Einstein 🧪  
-For scores above 50 points.
-"""
-    await interaction.response.send_message(ranks_description, ephemeral=True)
-
-
-# --- On Ready ---
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
-    await tree.sync()
-    # Start your scheduled tasks
+    print("------")
+    try:
+        await tree.sync()
+        print("Commands synced.")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
+
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
     reveal_answer.start()
 
 
-# --- Run bot ---
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_TOKEN:
-    print("ERROR: DISCORD_BOT_TOKEN environment variable not set.")
-else:
-    client.run(DISCORD_TOKEN)
+client.run(os.getenv("DISCORD_BOT_TOKEN"))
