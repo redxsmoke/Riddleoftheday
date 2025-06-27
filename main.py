@@ -162,8 +162,6 @@ async def on_message(message):
     if not current_riddle or current_answer_revealed:
         return
 
-    # Prevent submitter from answering their own riddle (optional, but you didn't mention so skipping)
-
     # If user already answered correctly this riddle
     if user_id in correct_users:
         try:
@@ -215,7 +213,7 @@ async def on_message(message):
             pass
 
     # --- Countdown message logic ---
-    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
     now_est = now_utc.astimezone(EST)
     today_est = now_est.date()
 
@@ -390,7 +388,7 @@ async def submitriddle(interaction: discord.Interaction):
             return
 
         user_id = str(interaction.user.id)
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+        new_id = str(int(datetime.now(timezone.utc).timestamp() * 1000)) + "_" + user_id
         submitted_questions.append({
             "id": new_id,
             "question": question,
@@ -410,7 +408,7 @@ async def submitriddle(interaction: discord.Interaction):
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user, INITIAL_DAY_EST
 
-    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
     now_est = now_utc.astimezone(EST)
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
@@ -434,7 +432,7 @@ async def post_riddle():
 async def reveal_answer():
     global current_answer_revealed, correct_users, current_riddle
 
-    now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
     if not channel:
@@ -450,7 +448,7 @@ async def reveal_answer():
     reveal_time_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)
     reveal_time_utc = reveal_time_est.astimezone(timezone.utc)
 
-    if datetime.utcnow().replace(tzinfo=timezone.utc) >= reveal_time_utc:
+    if datetime.now(timezone.utc) >= reveal_time_utc:
         current_answer_revealed = True
         correct_answer = current_riddle["answer"]
         submitter_text = "Riddle of the Day bot"
