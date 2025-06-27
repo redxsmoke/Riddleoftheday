@@ -30,7 +30,7 @@ deducted_for_user = set()  # users who lost 1 point this riddle
 
 leaderboard_pages = {}
 
-max_id = 0  # Tracks highest question id assigned (integer)
+max_id = 0  # Highest numeric ID assigned so far (int)
 
 # --- Helper functions ---
 
@@ -75,27 +75,26 @@ def pick_next_riddle():
     return riddle
 
 def format_question_text(qdict):
-    base = f"@everyone [{qdict['id']}] {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
+    base = f"@everyone [{qdict.get('id','NA')}] {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
     remaining = count_unused_questions()
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
     return base
 
-# --- Load data and initialize max_id ---
+# --- Load data ---
 
 submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
-# Initialize max_id from existing questions
+# Initialize max_id from existing question IDs (assumes numeric string IDs)
 for q in submitted_questions:
     try:
         qid = int(q["id"])
-        global max_id
         if qid > max_id:
             max_id = qid
     except Exception:
-        pass  # Ignore non-integer IDs (if any)
+        pass  # Ignore non-integer IDs
 
 # --- /listquestions command ---
 
@@ -114,7 +113,7 @@ class QuestionListView(discord.ui.View):
         page_questions = self.questions[start:end]
         lines = [f"📋 Total riddles: {len(self.questions)}"]
         for q in page_questions:
-            lines.append(f"{q['id']}. {q['question']}")
+            lines.append(f"[{q.get('id','NA')}] {q['question']}")
         return "\n".join(lines)
 
     async def update_message(self, interaction):
@@ -156,25 +155,22 @@ async def listquestions(interaction: discord.Interaction):
 async def removequestion(interaction: discord.Interaction):
     class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
         question_id = discord.ui.TextInput(
-            label="Enter the ID of the riddle to remove",
-            placeholder="e.g. 10",
-            required=True,
+            label="Enter the ID of the riddle to remove", 
+            placeholder="e.g. 5", 
+            required=True, 
             max_length=10
         )
         async def on_submit(self, modal_interaction: discord.Interaction):
-            num = self.question_id.value.strip()
-            found = None
-            for i, q in enumerate(submitted_questions):
-                if q["id"] == num:
-                    found = (i, q)
-                    break
-            if found is None:
-                await modal_interaction.response.send_message(f"⚠️ No riddle found with ID {num}.", ephemeral=True)
+            qid = self.question_id.value.strip()
+            found_index = next((i for i, q in enumerate(submitted_questions) if q.get("id") == qid), None)
+            if found_index is None:
+                await modal_interaction.response.send_message(f"⚠️ No riddle found with ID `{qid}`.", ephemeral=True)
                 return
-            index, removed = found
-            submitted_questions.pop(index)
+            removed = submitted_questions.pop(found_index)
             save_json(QUESTIONS_FILE, submitted_questions)
-            await modal_interaction.response.send_message(f"✅ Removed riddle with ID {num}: \"{removed['question']}\"", ephemeral=True)
+            # Also remove from used_question_ids if present
+            used_question_ids.discard(qid)
+            await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
     await interaction.response.send_modal(RemoveQuestionModal())
 
 # --- /submitriddle command ---
@@ -208,7 +204,6 @@ async def submitriddle(interaction: discord.Interaction):
         max_id += 1
         new_id = str(max_id)
         uid = str(interaction.user.id)
-
         submitted_questions.append({
             "id": new_id,
             "question": q,
@@ -277,7 +272,7 @@ async def show_leaderboard(channel, user_id):
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
 
-# --- on_message event to handle guesses ---
+# --- on_message event for guesses ---
 
 @client.event
 async def on_message(message):
@@ -417,19 +412,25 @@ async def reveal_answer():
             except:
                 lines.append("• Unknown user")
     else:
-        lines.append("😞 No one solved this riddle.")
+        lines.append("No one guessed correctly this time.")
     submitter_id = current_riddle.get("submitter_id")
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
     lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
 
     await channel.send("\n".join(lines))
 
-# --- Ready and main ---
+# --- Ready and Main ---
 
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
-    await tree.sync()
+    guild_id = int(os.getenv("DISCORD_GUILD_ID") or 0)
+    if guild_id:
+        await tree.sync(guild=discord.Object(id=guild_id))
+        print(f"Commands synced to guild {guild_id}.")
+    else:
+        await tree.sync()
+        print("Commands synced globally.")
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
@@ -437,9 +438,8 @@ async def on_ready():
 
 # --- Run bot ---
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not TOKEN:
-    print("Please set the DISCORD_BOT_TOKEN environment variable.")
-    exit(1)
-
-client.run(TOKEN)
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+if not DISCORD_TOKEN:
+    print("Error: DISCORD_BOT_TOKEN environment variable not set.")
+else:
+    client.run(DISCORD_TOKEN)
