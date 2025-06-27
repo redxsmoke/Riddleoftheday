@@ -52,11 +52,11 @@ def save_all_scores():
     save_json(STREAKS_FILE, streaks)
 
 def get_rank(score, streak):
-    # Determine if user is Master Sushi Chef (top scorer)
+    # Determine if user is Master Sushi Chef (top scorer) with sushi emoji 🍣
     if scores:
         max_score = max(scores.values())
         if score == max_score and max_score > 0:
-            return "👑 Master Sushi Chef (Top scorer)"
+            return "🍣 Master Sushi Chef (Top scorer)"
     if streak >= 3:
         return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
     if score <= 5:
@@ -447,9 +447,40 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 • `/leaderboard` - Show the top solvers.
 • `/addpoints` - (Admin) Add a point to a user.
 • `/removepoint` - (Admin) Remove a point from a user.
+• `/ranks` - Show the rank descriptions.
 • `/riddleofthedaycommands` - Show this list of commands.
 """
     await interaction.response.send_message(commands_list, ephemeral=True)
+
+
+# --- /ranks command ---
+@tree.command(name="ranks", description="Show rank descriptions")
+async def ranks(interaction: discord.Interaction):
+    ranks_description = """
+**Riddle of the Day Ranks and Descriptions:**
+
+🍣 **Master Sushi Chef (Top scorer)**  
+Awarded to the user(s) with the highest score.
+
+🔥 **Streak Samurai**  
+Achieved by solving 3 or more riddles consecutively.
+
+Sushi Newbie 🍽️  
+For scores 0 to 5 points.
+
+Maki Novice 🍣  
+For scores between 6 and 15 points.
+
+Sashimi Skilled 🍤  
+For scores between 16 and 25 points.
+
+Brainy Botan 🧠  
+For scores between 26 and 50 points.
+
+Sushi Einstein 🧪  
+For scores above 50 points.
+"""
+    await interaction.response.send_message(ranks_description, ephemeral=True)
 
 
 # --- On Ready ---
