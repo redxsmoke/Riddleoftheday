@@ -8,7 +8,7 @@ import random
 from discord import app_commands
 
 # --- Timezone Setup ---
-EST = timezone(timedelta(hours=-5))  # EST fixed offset UTC-5 (no DST)
+EST = timezone(timedelta(hours=-5))  # Fixed EST offset UTC-5 (no DST)
 
 # --- Global Variables ---
 intents = discord.Intents.default()
@@ -87,6 +87,18 @@ submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
+# --- Debug prints on startup ---
+print("Starting bot...")
+token = os.getenv("DISCORD_BOT_TOKEN")
+channel_id = os.getenv("DISCORD_CHANNEL_ID")
+guild_id = os.getenv("DISCORD_GUILD_ID")
+print(f"Token set? {'Yes' if token else 'No'}")
+print(f"Channel ID: {channel_id}")
+print(f"Guild ID: {guild_id}")
+
+if not token:
+    print("ERROR: DISCORD_BOT_TOKEN environment variable is NOT set!")
+
 # --- Events ---
 
 @client.event
@@ -96,26 +108,25 @@ async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
 
-    GUILD_ID = os.getenv("DISCORD_GUILD_ID")
-    if GUILD_ID:
-        guild_obj = discord.Object(id=int(GUILD_ID))
+    if guild_id:
+        guild_obj = discord.Object(id=int(guild_id))
         await tree.sync(guild=guild_obj)
-        print(f"Synced commands to guild {GUILD_ID}")
+        print(f"Synced commands to guild {guild_id}")
     else:
         await tree.sync()
         print("Synced global commands")
 
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
+    ch_id = int(channel_id or 0)
+    if ch_id == 0:
+        print("DISCORD_CHANNEL_ID not set or invalid.")
         return
 
-    channel = client.get_channel(channel_id)
+    channel = client.get_channel(ch_id)
     if not channel:
         print("Channel not found.")
         return
 
-    # --- Startup test: Post riddle and reveal after 1 minute ---
+    # Startup test: post riddle and reveal answer after 1 minute
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
     correct_users.clear()
@@ -147,7 +158,7 @@ async def on_ready():
 
     await channel.send("\n".join(lines))
 
-    # Start the regular scheduled tasks after test run
+    # Start the scheduled tasks after the test run
     post_riddle.start()
     reveal_answer.start()
 
@@ -156,8 +167,8 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if message.channel.id != channel_id:
+    ch_id = int(channel_id or 0)
+    if message.channel.id != ch_id:
         return
 
     global correct_users, guess_attempts, deducted_for_user, current_riddle
@@ -189,9 +200,11 @@ async def on_message(message):
     guess = content.lower()
     correct_answer = current_riddle["answer"].lower()
 
+    # Accept singular/plural variants by stripping trailing 's'
     if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
         correct_users.add(user_id)
         scores[user_id] = scores.get(user_id, 0) + 1
+        # Increment streak on correct answer
         streaks[user_id] = streaks.get(user_id, 0) + 1
         save_all_scores()
         try:
@@ -214,7 +227,7 @@ async def on_message(message):
         except:
             pass
 
-    # Countdown message logic
+    # Countdown message logic (to next answer reveal)
     now_utc = datetime.now(timezone.utc)
     now_est = now_utc.astimezone(EST)
     today_est = now_est.date()
@@ -315,7 +328,8 @@ async def submitriddle(interaction: discord.Interaction):
         await dm.send("💡 Now enter the answer:")
         a = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
         if not q or not a:
-            await dm.send("⚠️ Both question and answer required."); return
+            await dm.send("⚠️ Both question and answer are required.")
+            return
         uid = str(interaction.user.id)
         new_id = f"{int(datetime.utcnow().timestamp()*1000)}_{uid}"
         submitted_questions.append({"id": new_id,"question":q,"answer":a,"submitter_id":uid})
@@ -348,63 +362,93 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     uid = str(interaction.user.id)
-    sv = scores.get(uid,0); st=streaks.get(uid,0)
-    await interaction.response.send_message(f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv,st)}",ephemeral=True)
+    sv = scores.get(uid,0)
+    st = streaks.get(uid,0)
+    await interaction.response.send_message(f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv,st)}", ephemeral=True)
 
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
     uid = str(interaction.user.id)
-    leaderboard_pages[uid]=0
-    await show_leaderboard(interaction.channel,uid)
-    await interaction.response.send_message("📋 Showing leaderboard...",ephemeral=True)
+    leaderboard_pages[uid] = 0
+    await show_leaderboard(interaction.channel, uid)
+    await interaction.response.send_message("📋 Showing leaderboard...", ephemeral=True)
 
 async def show_leaderboard(channel, user_id):
-    sorted_scores = sorted(scores.items(),key=lambda x:x[1],reverse=True)
-    total_pages = max((len(sorted_scores)-1)//10+1,1)
-    page = leaderboard_pages.get(user_id,0)
-    page=min(page,total_pages-1)
-    embed=discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})",color=discord.Color.gold())
-    start=page*10
-    for i,(uid,sv) in enumerate(sorted_scores[start:start+10],start=start+1):
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+    page = leaderboard_pages.get(user_id, 0)
+    page = min(page, total_pages - 1)
+    embed = discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})", color=discord.Color.gold())
+    start = page * 10
+    for i, (uid, sv) in enumerate(sorted_scores[start:start+10], start=start+1):
         try:
-            user=await client.fetch_user(int(uid))
-            st=streaks.get(uid,0)
-            embed.add_field(name=f"{i}. {user.display_name}",value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv,st)}",inline=False)
+            user = await client.fetch_user(int(uid))
+            st = streaks.get(uid, 0)
+            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv, st)}", inline=False)
         except:
-            embed.add_field(name=f"{i}. Unknown",value=f"Score: {sv}",inline=False)
+            embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
 
-@tasks.loop(time=time(19,15,tzinfo=timezone.utc))
+# --- Scheduled tasks ---
+
+@tasks.loop(time=time(19, 15, tzinfo=timezone.utc))
 async def post_riddle():
-    global current_riddle,current_answer_revealed,correct_users,guess_attempts,deducted_for_user
-    ch=int(os.getenv("DISCORD_CHANNEL_ID","0")); channel=client.get_channel(ch)
-    if not channel: return
-    current_riddle=pick_next_riddle(); current_answer_revealed=False
-    correct_users.clear(); guess_attempts.clear(); deducted_for_user.clear()
-    txt=format_question_text(current_riddle)
-    sid=current_riddle.get("submitter_id"); stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    ch = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    channel = client.get_channel(ch)
+    if not channel:
+        print("post_riddle: Channel not found.")
+        return
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+    txt = format_question_text(current_riddle)
+    sid = current_riddle.get("submitter_id")
+    stext = f"<@{sid}>" if sid else "Riddle of the Day bot"
     await channel.send(f"{txt}\n\n_(Submitted by: {stext})_")
 
-@tasks.loop(time=time(0,0,tzinfo=timezone.utc))
+@tasks.loop(time=time(0, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
-    if not current_riddle or current_answer_revealed: return
-    ch=int(os.getenv("DISCORD_CHANNEL_ID","0")); channel=client.get_channel(ch)
-    if not channel: return
-    current_answer_revealed=True; ans=current_riddle["answer"]
-    lines=[f"✅ The correct answer was: **{ans}**"]
+    if not current_riddle or current_answer_revealed:
+        return
+    ch = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    channel = client.get_channel(ch)
+    if not channel:
+        print("reveal_answer: Channel not found.")
+        return
+    current_answer_revealed = True
+    answer = current_riddle["answer"]
+    lines = [f"✅ The correct answer was: **{answer}**"]
     if correct_users:
-        lines.append("🎉 Congratulations to the following solvers:")
+        lines.append("🎉 Congratulations to:")
         for uid in correct_users:
-            try: u=await client.fetch_user(int(uid)); lines.append(f"• {u.display_name}")
-            except: lines.append("• Unknown user")
-    else: lines.append("No one guessed correctly this time.")
-    sid=current_riddle.get("submitter_id"); stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+            try:
+                user = await client.fetch_user(int(uid))
+                lines.append(f"• {user.display_name}")
+            except:
+                lines.append("• Unknown user")
+    else:
+        lines.append("No correct guesses today.")
+    sid = current_riddle.get("submitter_id")
+    stext = f"<@{sid}>" if sid else "Riddle of the Day bot"
     lines.append(f"\n_(Riddle submitted by: {stext})_")
     await channel.send("\n".join(lines))
 
-DISCORD_BOT_TOKEN=os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_BOT_TOKEN:
-    print("Please set the DISCORD_BOT_TOKEN environment variable!")
+# --- Error handling for commands ---
+@listquestions.error
+@removequestion.error
+@addpoints.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⛔ You do not have permission to use this command.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"⚠️ An error occurred: {error}", ephemeral=True)
+
+# --- Run bot ---
+if token:
+    client.run(token)
 else:
-    client.run(DISCORD_BOT_TOKEN)
+    print("Bot token not found. Please set the DISCORD_BOT_TOKEN environment variable.")
