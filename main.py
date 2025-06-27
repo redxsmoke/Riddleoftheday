@@ -84,146 +84,7 @@ submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
-# --- Debug prints on startup ---
-print("Starting bot...")
-token = os.getenv("DISCORD_BOT_TOKEN")
-channel_id = os.getenv("DISCORD_CHANNEL_ID")
-guild_id = os.getenv("DISCORD_GUILD_ID")
-print(f"Token set? {'Yes' if token else 'No'}")
-print(f"Channel ID: {channel_id}")
-print(f"Guild ID: {guild_id}")
-
-if not token:
-    print("ERROR: DISCORD_BOT_TOKEN environment variable is NOT set!")
-
-# --- Events ---
-
-@client.event
-async def on_ready():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
-
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
-    print("------")
-
-    if guild_id:
-        guild_obj = discord.Object(id=int(guild_id))
-        await tree.sync(guild=guild_obj)
-        print(f"Synced commands to guild {guild_id}")
-    else:
-        await tree.sync()
-        print("Synced global commands")
-
-    ch_id = int(channel_id or 0)
-    if ch_id == 0:
-        print("DISCORD_CHANNEL_ID not set or invalid.")
-        return
-
-    channel = client.get_channel(ch_id)
-    if not channel:
-        print("Channel not found.")
-        return
-
-    # Initialize for first day
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-    deducted_for_user.clear()
-
-    # Start scheduled tasks
-    daily_purge.start()
-    notify_upcoming_riddle.start()
-    post_riddle.start()
-    reveal_answer.start()
-
-@client.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    ch_id = int(channel_id or 0)
-    if message.channel.id != ch_id:
-        return
-
-    global correct_users, guess_attempts, deducted_for_user, current_riddle
-
-    user_id = str(message.author.id)
-    content = message.content.strip()
-
-    if not current_riddle or current_answer_revealed:
-        return
-
-    # Block user if they submitted this riddle
-    if current_riddle.get("submitter_id") == user_id:
-        try:
-            await message.delete()
-        except:
-            pass
-        await message.channel.send(f"⛔ You submitted this riddle and cannot answer it, {message.author.mention}.", delete_after=10)
-        return
-
-    if user_id in correct_users:
-        try:
-            await message.delete()
-        except:
-            pass
-        await message.channel.send(f"✅ You already answered correctly, {message.author.mention}. No more guesses counted.", delete_after=5)
-        return
-
-    attempts = guess_attempts.get(user_id, 0)
-    if attempts >= 5:
-        try:
-            await message.delete()
-        except:
-            pass
-        await message.channel.send(f"❌ You are out of guesses for this riddle, {message.author.mention}.", delete_after=5)
-        return
-
-    guess_attempts[user_id] = attempts + 1
-    guess = content.lower()
-    correct_answer = current_riddle["answer"].lower()
-
-    # Accept singular/plural variants by stripping trailing 's'
-    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
-        correct_users.add(user_id)
-        scores[user_id] = scores.get(user_id, 0) + 1
-        # Increment streak on correct answer
-        streaks[user_id] = streaks.get(user_id, 0) + 1
-        save_all_scores()
-        try:
-            await message.delete()
-        except:
-            pass
-        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
-    else:
-        remaining = 5 - guess_attempts[user_id]
-        if remaining == 0 and user_id not in deducted_for_user:
-            scores[user_id] = max(0, scores.get(user_id, 0) - 1)
-            streaks[user_id] = 0
-            deducted_for_user.add(user_id)
-            save_all_scores()
-            await message.channel.send(f"❌ Incorrect, {message.author.mention}. You've used all guesses and lost 1 point.", delete_after=8)
-        elif remaining > 0:
-            await message.channel.send(f"❌ Incorrect, {message.author.mention}. {remaining} guess(es) left.", delete_after=6)
-        try:
-            await message.delete()
-        except:
-            pass
-
-    # Countdown message logic (to next answer reveal)
-    now_utc = datetime.now(timezone.utc)
-    reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
-    if now_utc >= reveal_dt:
-        reveal_dt += timedelta(days=1)
-    delta = reveal_dt - now_utc
-
-    hours, remainder = divmod(int(delta.total_seconds()), 3600)
-    minutes = remainder // 60
-    countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
-    await message.channel.send(countdown_msg, delete_after=12)
-
-# --- /listquestions with pagination ---
-
+# --- /listquestions command ---
 class QuestionListView(discord.ui.View):
     def __init__(self, user_id, questions, per_page=10):
         super().__init__(timeout=300)
@@ -237,7 +98,6 @@ class QuestionListView(discord.ui.View):
         start = self.current_page * self.per_page
         end = start + self.per_page
         page_questions = self.questions[start:end]
-
         lines = [f"📋 Total riddles: {len(self.questions)}"]
         for idx, q in enumerate(page_questions, start=start + 1):
             lines.append(f"{idx}. {q['question']}")
@@ -268,17 +128,22 @@ class QuestionListView(discord.ui.View):
 @tree.command(name="listquestions", description="List all submitted riddles")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def listquestions(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     if not submitted_questions:
-        await interaction.response.send_message("📭 No riddles found in the queue.", ephemeral=True)
+        await interaction.followup.send("📭 No riddles found in the queue.", ephemeral=True)
         return
     view = QuestionListView(interaction.user.id, submitted_questions)
-    await interaction.response.send_message(content=view.get_page_content(), view=view, ephemeral=True)
-
+    await interaction.followup.send(content=view.get_page_content(), view=view, ephemeral=True)
 @tree.command(name="removequestion", description="Remove a submitted riddle by number")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def removequestion(interaction: discord.Interaction):
     class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
-        question_number = discord.ui.TextInput(label="Enter the number of the riddle to remove", placeholder="e.g. 3", required=True, max_length=5)
+        question_number = discord.ui.TextInput(
+            label="Enter the number of the riddle to remove", 
+            placeholder="e.g. 3", 
+            required=True, 
+            max_length=5
+        )
         async def on_submit(self, modal_interaction: discord.Interaction):
             try:
                 num = int(self.question_number.value.strip())
@@ -294,7 +159,7 @@ async def removequestion(interaction: discord.Interaction):
 
 @tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
 async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.send_message("✍️ Check your DMs to submit a riddle!", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
 
     def check(m): return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
 
@@ -328,20 +193,12 @@ async def submitriddle(interaction: discord.Interaction):
         save_json(QUESTIONS_FILE, submitted_questions)
 
         await dm.send("✅ Your riddle has been submitted and added to the queue!\n⚠️ You will **not** be able to answer your own riddle when it is posted.")
+        await interaction.followup.send("✅ Riddle submitted via DM!", ephemeral=True)
 
     except asyncio.TimeoutError:
-        await interaction.user.send("⏰ Timed out. Try /submitriddle again.")
-
-@tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands_list = (
-        "**Available Riddle of the Day Commands:**\n"
-        "• `/score`\n• `/submitriddle`\n• `/leaderboard`\n"
-        "• `/listquestions` (admin)\n• `/removequestion` (admin)\n"
-        "• `/addpoints` (admin)\n"
-        "• Type your guess to answer!\n"
-    )
-    await interaction.response.send_message(commands_list, ephemeral=True)
+        await interaction.followup.send("⏰ Timed out. Try /submitriddle again.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("❌ I couldn’t DM you. Please enable DMs from server members and try again.", ephemeral=True)
 
 @tree.command(name="addpoints", description="Add 1 point to a user's score")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -351,14 +208,20 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
     scores[uid] = scores.get(uid, 0) + 1
     streaks[uid] = streaks.get(uid, 0) + 1
     save_all_scores()
-    await interaction.response.send_message(f"✅ Added 1 point and 1 streak to {user.mention}. New score: {scores[uid]}, new streak: {streaks[uid]}", ephemeral=True)
+    await interaction.response.send_message(
+        f"✅ Added 1 point and 1 streak to {user.mention}. New score: {scores[uid]}, new streak: {streaks[uid]}",
+        ephemeral=True
+    )
 
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     uid = str(interaction.user.id)
-    sv = scores.get(uid,0)
-    st = streaks.get(uid,0)
-    await interaction.response.send_message(f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv,st)}", ephemeral=True)
+    sv = scores.get(uid, 0)
+    st = streaks.get(uid, 0)
+    await interaction.response.send_message(
+        f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv, st)}",
+        ephemeral=True
+    )
 
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
@@ -382,37 +245,107 @@ async def show_leaderboard(channel, user_id):
         except:
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
 
-# --- New scheduled tasks ---
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    if message.channel.id != ch_id:
+        return
+
+    global correct_users, guess_attempts, deducted_for_user, current_riddle
+
+    user_id = str(message.author.id)
+    content = message.content.strip()
+
+    if not current_riddle or current_answer_revealed:
+        return
+
+    # Block submitter from answering their own riddle
+    if current_riddle.get("submitter_id") == user_id:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"⛔ You submitted this riddle and cannot answer it, {message.author.mention}.", delete_after=10)
+        return
+
+    if user_id in correct_users:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"✅ You already answered correctly, {message.author.mention}. No more guesses counted.", delete_after=5)
+        return
+
+    attempts = guess_attempts.get(user_id, 0)
+    if attempts >= 5:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"❌ You are out of guesses for this riddle, {message.author.mention}.", delete_after=5)
+        return
+
+    guess_attempts[user_id] = attempts + 1
+    guess = content.lower()
+    correct_answer = current_riddle["answer"].lower()
+
+    # Accept basic singular/plural matching
+    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
+        correct_users.add(user_id)
+        scores[user_id] = scores.get(user_id, 0) + 1
+        streaks[user_id] = streaks.get(user_id, 0) + 1
+        save_all_scores()
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
+    else:
+        remaining = 5 - guess_attempts[user_id]
+        if remaining == 0 and user_id not in deducted_for_user:
+            scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+            streaks[user_id] = 0
+            deducted_for_user.add(user_id)
+            save_all_scores()
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. You've used all guesses and lost 1 point.", delete_after=8)
+        elif remaining > 0:
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. {remaining} guess(es) left.", delete_after=6)
+        try: await message.delete()
+        except: pass
+
+    # Countdown to answer reveal
+    now_utc = datetime.now(timezone.utc)
+    reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
+    if now_utc >= reveal_dt:
+        reveal_dt += timedelta(days=1)
+    delta = reveal_dt - now_utc
+    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+    minutes = remainder // 60
+    countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
+    await message.channel.send(countdown_msg, delete_after=12)
+
+# --- Scheduled tasks ---
 
 @tasks.loop(time=time(6, 55, tzinfo=timezone.utc))
 async def daily_purge():
-    ch_id = int(channel_id or 0)
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if not channel:
         print("Channel not found for daily purge.")
         return
-    print("Purging messages in channel...")
     try:
-        async for message in channel.history(limit=100):
-            await message.delete()
-        print("Purge completed.")
+        async for msg in channel.history(limit=100):
+            await msg.delete()
+        print("Daily purge completed.")
     except Exception as e:
         print(f"Error during purge: {e}")
 
 @tasks.loop(time=time(6, 57, tzinfo=timezone.utc))
 async def notify_upcoming_riddle():
-    ch_id = int(channel_id or 0)
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if not channel:
-        print("Channel not found for notification.")
-        return
-    await channel.send("⏳ The next riddle will be posted soon!")
+    if channel:
+        await channel.send("⏳ The next riddle will be posted soon!")
 
 @tasks.loop(time=time(7, 0, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
-    ch_id = int(channel_id or 0)
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if not channel:
         print("Channel not found for posting riddles.")
@@ -433,16 +366,12 @@ async def post_riddle():
 @tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
-    ch_id = int(channel_id or 0)
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if not channel:
-        print("Channel not found for revealing answer.")
-        return
-    if not current_riddle:
+    if not channel or not current_riddle:
         return
 
     current_answer_revealed = True
-
     correct_answer = current_riddle["answer"]
     lines = [f"✅ The correct answer was: **{correct_answer}**"]
     if correct_users:
@@ -461,9 +390,38 @@ async def reveal_answer():
 
     await channel.send("\n".join(lines))
 
-# --- Main ---
+# --- Ready and Main ---
+
+@client.event
+async def on_ready():
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    guild_id = os.getenv("DISCORD_GUILD_ID")
+    if guild_id:
+        await tree.sync(guild=discord.Object(id=int(guild_id)))
+        print(f"Commands synced to guild {guild_id}")
+    else:
+        await tree.sync()
+        print("Global commands synced")
+
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    if ch_id == 0:
+        print("DISCORD_CHANNEL_ID not set or invalid.")
+        return
+
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+
+    daily_purge.start()
+    notify_upcoming_riddle.start()
+    post_riddle.start()
+    reveal_answer.start()
 
 if __name__ == "__main__":
+    token = os.getenv("DISCORD_BOT_TOKEN")
     if token:
         client.run(token)
     else:
