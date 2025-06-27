@@ -93,6 +93,7 @@ submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
+# Initialize max_id from existing question IDs (assuming numeric IDs)
 existing_ids = [int(q["id"]) for q in submitted_questions if q.get("id") and str(q["id"]).isdigit()]
 max_id = max(existing_ids) if existing_ids else 0
 
@@ -239,7 +240,6 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
         ephemeral=True
     )
 
-
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     uid = str(interaction.user.id)
@@ -249,7 +249,6 @@ async def score(interaction: discord.Interaction):
         f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv, st)}",
         ephemeral=True
     )
-
 
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
@@ -273,7 +272,6 @@ async def show_leaderboard(channel, user_id):
         except:
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
-
 
 @client.event
 async def on_message(message):
@@ -349,7 +347,6 @@ async def on_message(message):
     countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
     await message.channel.send(countdown_msg, delete_after=12)
 
-
 # --- Scheduled tasks ---
 
 @tasks.loop(time=time(6, 55, tzinfo=timezone.utc))
@@ -379,7 +376,7 @@ async def post_riddle():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if not channel:
-        print("Channel not found for posting riddles.")
+        print("Channel not found for posting riddle.")
         return
 
     current_riddle = pick_next_riddle()
@@ -388,42 +385,50 @@ async def post_riddle():
     guess_attempts.clear()
     deducted_for_user.clear()
 
-    question_text = format_question_text(current_riddle)
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+    text = format_question_text(current_riddle)
+    await channel.send(text)
 
 @tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if not channel or not current_riddle:
+    if not channel or current_riddle is None:
         return
-
+    answer = current_riddle["answer"]
+    await channel.send(f"🔔 The answer to riddle {current_riddle['id']} is: **{answer}**")
     current_answer_revealed = True
-    correct_answer = current_riddle["answer"]
-    lines = [f"✅ The correct answer was: **{correct_answer}**"]
-    if correct_users:
-        lines.append("🎉 Congratulations to the following solvers:")
-        for uid in correct_users:
-            try:
-                user = await client.fetch_user(int(uid))
-                lines.append(f"• {user.display_name}")
-            except:
-                lines.append("• Unknown user")
-    else:
-        lines.append("No one guessed correctly this time.")
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-    lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
 
-    await channel.send("\n".join(lines))
+# --- /riddleofthedaycommands command ---
+@tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands_list = """
+**Available Riddle of the Day Commands:**
 
+• `/submitriddle` - Submit a new riddle via a form.
+• `/listquestions` - (Admin) List all submitted riddles.
+• `/removequestion` - (Admin) Remove a riddle by ID.
+• `/score` - View your current score and rank.
+• `/leaderboard` - Show the top solvers.
+• `/addpoints` - (Admin) Add a point to a user.
+• `/riddleofthedaycommands` - Show this list of commands.
+"""
+    await interaction.response.send_message(commands_list, ephemeral=True)
 
-# --- Ready and Main ---
-
+# --- On Ready ---
 @client.event
 async def on_ready():
-    print(f"Logged in as {client.user} (ID: {client.user
+    print(f"Logged in as {client.user} (ID: {client.user.id})")
+    await tree.sync()
+    # Start your scheduled tasks
+    daily_purge.start()
+    notify_upcoming_riddle.start()
+    post_riddle.start()
+    reveal_answer.start()
+
+# --- Run bot ---
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+if not DISCORD_TOKEN:
+    print("ERROR: DISCORD_BOT_TOKEN environment variable not set.")
+else:
+    client.run(DISCORD_TOKEN)
