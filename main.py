@@ -76,7 +76,7 @@ def pick_next_riddle():
     return riddle
 
 def format_question_text(qdict):
-    base = f"@everyone {qdict['question']} ***(Answer will be revealed in 1 minute)***"
+    base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
     remaining = count_unused_questions()
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
@@ -106,16 +106,14 @@ async def on_ready():
         print("Synced global commands")
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-
     channel = client.get_channel(channel_id)
     if not channel:
         print("Channel not found.")
         return
 
-    # --- Startup test: Post riddle and reveal after 1 minute ---
+    # On startup post riddle immediately, then answer after 1 minute (testing)
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
     correct_users.clear()
@@ -128,10 +126,10 @@ async def on_ready():
 
     await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
 
-    await asyncio.sleep(60)  # Wait 1 minute
+    # Wait 1 minute then post the answer for testing
+    await asyncio.sleep(60)
 
     current_answer_revealed = True
-
     correct_answer = current_riddle["answer"]
     lines = [f"✅ The correct answer was: **{correct_answer}**"]
     if correct_users:
@@ -145,10 +143,9 @@ async def on_ready():
     else:
         lines.append("No one guessed correctly this time.")
     lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
-
     await channel.send("\n".join(lines))
 
-    # Start the regular scheduled tasks after test run
+    # Start daily loops after testing
     post_riddle.start()
     reveal_answer.start()
 
@@ -169,6 +166,7 @@ async def on_message(message):
     if not current_riddle or current_answer_revealed:
         return
 
+    # If user already answered correctly this riddle
     if user_id in correct_users:
         try:
             await message.delete()
@@ -190,8 +188,10 @@ async def on_message(message):
     guess = content.lower()
     correct_answer = current_riddle["answer"].lower()
 
+    # Accept minor plural form
     if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
         correct_users.add(user_id)
+        # Add 1 point only once per user per riddle
         scores[user_id] = scores.get(user_id, 0) + 1
         streaks[user_id] = streaks.get(user_id, 0) + 1
         save_all_scores()
@@ -199,6 +199,7 @@ async def on_message(message):
             await message.delete()
         except:
             pass
+        # Send correct confirmation WITHOUT delete_after so message stays
         await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
     else:
         remaining = 5 - guess_attempts[user_id]
@@ -215,16 +216,21 @@ async def on_message(message):
         except:
             pass
 
-    # Countdown message logic
+    # --- Countdown message logic ---
     now_utc = datetime.now(timezone.utc)
     now_est = now_utc.astimezone(EST)
     today_est = now_est.date()
 
     if today_est == datetime.now(EST).date():
-        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)  # 9 PM EST
+        # Today only: countdown to 9:00 PM EST today
+        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)  # 9 PM EST today
         reveal_dt = reveal_est.astimezone(timezone.utc)
-        delta = max(reveal_dt - now_utc, timedelta(0))
+        if now_utc >= reveal_dt:
+            delta = timedelta(seconds=0)
+        else:
+            delta = reveal_dt - now_utc
     else:
+        # Starting tomorrow: countdown to 23:00 UTC today or next day if past 23:00 UTC
         reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
         if now_utc >= reveal_dt:
             reveal_dt += timedelta(days=1)
@@ -239,7 +245,7 @@ async def on_message(message):
 
 class QuestionListView(discord.ui.View):
     def __init__(self, user_id, questions, per_page=10):
-        super().__init__(timeout=300)
+        super().__init__(timeout=300)  # 5 minutes timeout
         self.user_id = user_id
         self.questions = questions
         self.per_page = per_page
@@ -290,7 +296,7 @@ async def listquestions(interaction: discord.Interaction):
     content = view.get_page_content()
     await interaction.response.send_message(content=content, view=view, ephemeral=True)
 
-# --- Remove question modal ---
+# --- Other commands ---
 
 @tree.command(name="removequestion", description="Remove a submitted riddle by number")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -320,8 +326,6 @@ async def removequestion(interaction: discord.Interaction):
 
     await interaction.response.send_modal(RemoveQuestionModal())
 
-# --- Score command ---
-
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
@@ -332,8 +336,6 @@ async def score(interaction: discord.Interaction):
         f"📊 {interaction.user.display_name}'s score: **{score_val}**, 🔥 Streak: {streak_val}\n🏅 Rank: {rank}",
         ephemeral=True
     )
-
-# --- Leaderboard command ---
 
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
@@ -370,8 +372,6 @@ async def show_leaderboard(channel, user_id):
 
     await channel.send(embed=embed)
 
-# --- Submit riddle command ---
-
 @tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
 async def submitriddle(interaction: discord.Interaction):
     await interaction.response.send_message("✍️ Check your DMs to submit a riddle!", ephemeral=True)
@@ -407,6 +407,21 @@ async def submitriddle(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         await interaction.user.send("⏰ Submission timed out. Please try again with /submitriddle.")
 
+# --- The restored /riddleofthedaycommands command ---
+
+@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands = """
+**Available Riddle Bot Commands:**
+• `/score` – View your score and rank.
+• `/submitriddle` – Submit a new riddle using the modal form.
+• `/leaderboard` – Show the top solvers.
+• `/listquestions` – List all submitted riddles (admin only).
+• `/removequestion` – Remove a riddle by number (admin only).
+• Just type your guess to answer the riddle!
+"""
+    await interaction.response.send_message(commands, ephemeral=True)
+
 # --- Scheduled Tasks ---
 
 @tasks.loop(time=time(19, 15, tzinfo=timezone.utc))  # 7:15 PM UTC daily post time
@@ -428,20 +443,19 @@ async def post_riddle():
     question_text = format_question_text(current_riddle)
     submitter_id = current_riddle.get("submitter_id")
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
     await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
 
-@tasks.loop(time=time(0, 0, tzinfo=timezone.utc))  # Midnight UTC answer reveal
+@tasks.loop(time=time(0, 0, tzinfo=timezone.utc))  # Midnight UTC reveal
 async def reveal_answer():
     global current_answer_revealed
-
-    if not current_riddle or current_answer_revealed:
-        return
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
     if not channel:
-        print("Channel not found for answer reveal.")
+        print("Channel not found for scheduled reveal.")
+        return
+
+    if not current_riddle or current_answer_revealed:
         return
 
     current_answer_revealed = True
@@ -463,10 +477,6 @@ async def reveal_answer():
 
     await channel.send("\n".join(lines))
 
-# --- Run Bot ---
+# --- Run the bot ---
 
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_BOT_TOKEN:
-    print("Please set the DISCORD_BOT_TOKEN environment variable!")
-else:
-    client.run(DISCORD_BOT_TOKEN)
+client.run(os.getenv("DISCORD_BOT_TOKEN"))
