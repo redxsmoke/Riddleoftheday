@@ -168,6 +168,15 @@ async def on_message(message):
     if not current_riddle or current_answer_revealed:
         return
 
+    # Prevent submitter from answering their own riddle
+    if current_riddle.get("submitter_id") == user_id:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"❌ You cannot answer your own riddle, {message.author.mention}.", delete_after=6)
+        return
+
     if user_id in correct_users:
         try:
             await message.delete()
@@ -320,7 +329,10 @@ async def submitriddle(interaction: discord.Interaction):
         new_id = f"{int(datetime.utcnow().timestamp()*1000)}_{uid}"
         submitted_questions.append({"id": new_id,"question":q,"answer":a,"submitter_id":uid})
         save_json(QUESTIONS_FILE, submitted_questions)
-        await dm.send("✅ Your riddle has been submitted!")
+        await dm.send(
+            "✅ Your riddle has been submitted and added to the queue!\n"
+            "⚠️ Note: You will NOT be able to answer your own riddle when it appears."
+        )
     except asyncio.TimeoutError:
         await interaction.user.send("⏰ Timed out. Try /submitriddle again.")
 
