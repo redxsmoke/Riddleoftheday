@@ -1,15 +1,17 @@
-# Ignore Python virtual environments and cache
 __pycache__/
 *.pyc
 *.pyo
 .venv/
 env/
 venv/
-
-# Git and config files
 .git/
-.gitignore
-
-# OS and editor files
+node_modules/
+*.log
+*.sqlite3
+*.db
 .DS_Store
 *.swp
+.pytest_cache/
+*.egg-info/
+build/
+dist/
