@@ -98,7 +98,16 @@ async def on_ready():
 
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
-    await tree.sync()
+
+    # Optionally sync only to a guild for fast command registration during dev
+    GUILD_ID = os.getenv("DISCORD_GUILD_ID")
+    if GUILD_ID:
+        guild_obj = discord.Object(id=int(GUILD_ID))
+        await tree.sync(guild=guild_obj)
+        print(f"Synced commands to guild {GUILD_ID}")
+    else:
+        await tree.sync()
+        print("Synced global commands")
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
@@ -108,10 +117,12 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
+            # Reset riddle state so the bot knows to start fresh
             current_riddle = None
             current_answer_revealed = False
             correct_users.clear()
             guess_attempts.clear()
+            # Post the initial riddle right after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -179,6 +190,32 @@ async def on_message(message):
         await show_leaderboard(message.channel, user_id)
         return
 
+    if content.startswith("!submitriddle "):
+        try:
+            _, rest = content.split(" ", 1)
+            question, answer = rest.split("|", 1)
+            question = question.strip()
+            answer = answer.strip()
+            if not question or not answer:
+                await message.channel.send("\u274c Please provide both a question and an answer, separated by '|'.")
+                return
+        except Exception:
+            await message.channel.send("\u274c Invalid format. Use: `!submitriddle Your question here | The answer here`")
+            return
+
+        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+        submitted_questions.append({
+            "id": new_id,
+            "question": question,
+            "answer": answer,
+            "submitter_id": user_id
+        })
+        save_json(QUESTIONS_FILE, submitted_questions)
+        await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
+        return
+
+    # Slash command /riddleofthedaycommands is handled separately and will not trigger here
+
     # Guessing logic inside the designated channel only
     if current_riddle and not current_answer_revealed:
         # Check if user already answered correctly
@@ -213,7 +250,7 @@ async def on_message(message):
             # Award point only once per user per riddle
             if user_id not in scores:
                 scores[user_id] = 0
-            if user_id not in correct_users or scores[user_id] == 0:
+            if user_id not in correct_users:
                 scores[user_id] = max(0, scores.get(user_id, 0) + 1)
                 streaks[user_id] = streaks.get(user_id, 0) + 1
                 save_all_scores()
@@ -252,32 +289,37 @@ async def on_message(message):
                 pass
             return
 
-@tree.command(name="submitriddle", description="Submit a new riddle")
-async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
-    user_id = str(interaction.user.id)
-    if not question.strip() or not answer.strip():
-        await interaction.response.send_message("\u274c Please provide both a question and an answer.", ephemeral=True)
-        return
-    new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-    submitted_questions.append({
-        "id": new_id,
-        "question": question.strip(),
-        "answer": answer.strip(),
-        "submitter_id": user_id
-    })
-    save_json(QUESTIONS_FILE, submitted_questions)
-    await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
-
 @tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
 **Available Riddle Bot Commands:**
-• `/submitriddle` – Submit a new riddle.
-• `!score` – View your score and rank.
-• `!leaderboard` – Show the top solvers.
+• `/score` – View your score and rank.
+• `/submitriddle` – Submit a new riddle using the modal form.
+• `/leaderboard` – Show the top solvers.
 • Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
+
+# Modal for /submitriddle slash command to get question & answer from user
+class SubmitRiddleModal(discord.ui.Modal, title="Submit a Riddle"):
+    question = discord.ui.TextInput(label="Question", style=discord.TextStyle.paragraph, required=True, max_length=200)
+    answer = discord.ui.TextInput(label="Answer", style=discord.TextStyle.short, required=True, max_length=100)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
+        submitted_questions.append({
+            "id": new_id,
+            "question": self.question.value.strip(),
+            "answer": self.answer.value.strip(),
+            "submitter_id": user_id
+        })
+        save_json(QUESTIONS_FILE, submitted_questions)
+        await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
+
+@tree.command(name="submitriddle", description="Submit a new riddle using a form")
+async def submitriddle(interaction: discord.Interaction):
+    await interaction.response.send_modal(SubmitRiddleModal())
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
