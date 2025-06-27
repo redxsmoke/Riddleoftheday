@@ -93,7 +93,6 @@ submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
-# Initialize max_id from existing question IDs (assuming numeric IDs)
 existing_ids = [int(q["id"]) for q in submitted_questions if q.get("id") and str(q["id"]).isdigit()]
 max_id = max(existing_ids) if existing_ids else 0
 
@@ -113,7 +112,7 @@ class QuestionListView(discord.ui.View):
         end = start + self.per_page
         page_questions = self.questions[start:end]
         lines = [f"📋 Total riddles: {len(self.questions)}"]
-        for idx, q in enumerate(page_questions, start=start + 1):
+        for q in page_questions:
             qid = q.get("id", "NA")
             lines.append(f"{qid}. {q['question']}")
         return "\n".join(lines)
@@ -226,39 +225,205 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
 async def submitriddle(interaction: discord.Interaction):
     await interaction.response.send_modal(SubmitRiddleModal())
 
-# (The rest of your bot code remains unchanged)
 
-# --- /riddleofthedaycommands command ---
-@tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands_list = """
-**Available Riddle of the Day Commands:**
-
-• `/submitriddle` - Submit a new riddle via a form.
-• `/listquestions` - (Admin) List all submitted riddles.
-• `/removequestion` - (Admin) Remove a riddle by ID.
-• `/score` - View your current score and rank.
-• `/leaderboard` - Show the top solvers.
-• `/addpoints` - (Admin) Add a point to a user.
-• `/riddleofthedaycommands` - Show this list of commands.
-"""
-    await interaction.response.send_message(commands_list, ephemeral=True)
+@tree.command(name="addpoints", description="Add 1 point to a user's score")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(user="The user to award a point to")
+async def addpoints(interaction: discord.Interaction, user: discord.User):
+    uid = str(user.id)
+    scores[uid] = scores.get(uid, 0) + 1
+    streaks[uid] = streaks.get(uid, 0) + 1
+    save_all_scores()
+    await interaction.response.send_message(
+        f"✅ Added 1 point and 1 streak to {user.mention}. New score: {scores[uid]}, new streak: {streaks[uid]}",
+        ephemeral=True
+    )
 
 
-# --- On Ready ---
+@tree.command(name="score", description="View your score and rank")
+async def score(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    sv = scores.get(uid, 0)
+    st = streaks.get(uid, 0)
+    await interaction.response.send_message(
+        f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv, st)}",
+        ephemeral=True
+    )
+
+
+@tree.command(name="leaderboard", description="Show the top solvers")
+async def leaderboard(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    leaderboard_pages[uid] = 0
+    await show_leaderboard(interaction.channel, uid)
+    await interaction.response.send_message("📋 Showing leaderboard...", ephemeral=True)
+
+async def show_leaderboard(channel, user_id):
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+    page = leaderboard_pages.get(user_id, 0)
+    page = min(page, total_pages - 1)
+    embed = discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})", color=discord.Color.gold())
+    start = page * 10
+    for i, (uid, sv) in enumerate(sorted_scores[start:start+10], start=start+1):
+        try:
+            user = await client.fetch_user(int(uid))
+            st = streaks.get(uid, 0)
+            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv, st)}", inline=False)
+        except:
+            embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
+    await channel.send(embed=embed)
+
+
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    if message.channel.id != ch_id:
+        return
+
+    global correct_users, guess_attempts, deducted_for_user, current_riddle
+
+    user_id = str(message.author.id)
+    content = message.content.strip()
+
+    if not current_riddle or current_answer_revealed:
+        return
+
+    # Block submitter from answering their own riddle
+    if current_riddle.get("submitter_id") == user_id:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"⛔ You submitted this riddle and cannot answer it, {message.author.mention}.", delete_after=10)
+        return
+
+    if user_id in correct_users:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"✅ You already answered correctly, {message.author.mention}. No more guesses counted.", delete_after=5)
+        return
+
+    attempts = guess_attempts.get(user_id, 0)
+    if attempts >= 5:
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"❌ You are out of guesses for this riddle, {message.author.mention}.", delete_after=5)
+        return
+
+    guess_attempts[user_id] = attempts + 1
+    guess = content.lower()
+    correct_answer = current_riddle["answer"].lower()
+
+    # Accept basic singular/plural matching
+    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
+        correct_users.add(user_id)
+        scores[user_id] = scores.get(user_id, 0) + 1
+        streaks[user_id] = streaks.get(user_id, 0) + 1
+        save_all_scores()
+        try: await message.delete()
+        except: pass
+        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
+    else:
+        remaining = 5 - guess_attempts[user_id]
+        if remaining == 0 and user_id not in deducted_for_user:
+            scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+            streaks[user_id] = 0
+            deducted_for_user.add(user_id)
+            save_all_scores()
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. You've used all guesses and lost 1 point.", delete_after=8)
+        elif remaining > 0:
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. {remaining} guess(es) left.", delete_after=6)
+        try: await message.delete()
+        except: pass
+
+    # Countdown to answer reveal
+    now_utc = datetime.now(timezone.utc)
+    reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
+    if now_utc >= reveal_dt:
+        reveal_dt += timedelta(days=1)
+    delta = reveal_dt - now_utc
+    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+    minutes = remainder // 60
+    countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
+    await message.channel.send(countdown_msg, delete_after=12)
+
+
+# --- Scheduled tasks ---
+
+@tasks.loop(time=time(6, 55, tzinfo=timezone.utc))
+async def daily_purge():
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("Channel not found for daily purge.")
+        return
+    try:
+        async for msg in channel.history(limit=100):
+            await msg.delete()
+        print("Daily purge completed.")
+    except Exception as e:
+        print(f"Error during purge: {e}")
+
+@tasks.loop(time=time(6, 57, tzinfo=timezone.utc))
+async def notify_upcoming_riddle():
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if channel:
+        await channel.send("⏳ The next riddle will be posted soon!")
+
+@tasks.loop(time=time(7, 0, tzinfo=timezone.utc))
+async def post_riddle():
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("Channel not found for posting riddles.")
+        return
+
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+
+    question_text = format_question_text(current_riddle)
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
+@tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
+async def reveal_answer():
+    global current_answer_revealed
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if not channel or not current_riddle:
+        return
+
+    current_answer_revealed = True
+    correct_answer = current_riddle["answer"]
+    lines = [f"✅ The correct answer was: **{correct_answer}**"]
+    if correct_users:
+        lines.append("🎉 Congratulations to the following solvers:")
+        for uid in correct_users:
+            try:
+                user = await client.fetch_user(int(uid))
+                lines.append(f"• {user.display_name}")
+            except:
+                lines.append("• Unknown user")
+    else:
+        lines.append("No one guessed correctly this time.")
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+    lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
+
+    await channel.send("\n".join(lines))
+
+
+# --- Ready and Main ---
+
 @client.event
 async def on_ready():
-    print(f"Logged in as {client.user} (ID: {client.user.id})")
-    await tree.sync()
-    # Start your tasks here (assuming they exist)
-    # daily_purge.start()
-    # notify_upcoming_riddle.start()
-    # post_riddle.start()
-    # reveal_answer.start()
-
-# --- Run bot ---
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_TOKEN:
-    print("ERROR: DISCORD_BOT_TOKEN environment variable not set.")
-else:
-    client.run(DISCORD_TOKEN)
+    print(f"Logged in as {client.user} (ID: {client.user
