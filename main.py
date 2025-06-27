@@ -84,6 +84,11 @@ def format_question_text(qdict):
 
 # --- Load data ---
 submitted_questions = load_json(QUESTIONS_FILE)
+
+# 👇 Simulate that all riddles were submitted by IzzyBan (e.g., ID: 123456789012345678)
+for q in submitted_questions:
+    q["submitter_id"] = "123456789012345678"
+
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
@@ -160,47 +165,96 @@ async def on_ready():
     post_riddle.start()
     reveal_answer.start()
 
-# ... OMITTED unchanged functions for brevity ...
+@client.event
+async def on_message(message):
+    if message.author.bot:
+        return
 
-@tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
-async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.send_message("✍️ Check your DMs to submit a riddle!", ephemeral=True)
+    ch_id = int(channel_id or 0)
+    if message.channel.id != ch_id:
+        return
 
-    def check(m): return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
+    global correct_users, guess_attempts, deducted_for_user, current_riddle
 
-    try:
-        dm = await interaction.user.create_dm()
-        await dm.send("✍️ Please enter your riddle question:")
+    user_id = str(message.author.id)
+    content = message.content.strip()
 
-        q = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
-        q_normalized = q.lower().replace(" ", "")
-        for existing in submitted_questions:
-            existing_q = existing["question"].strip().lower().replace(" ", "")
-            if existing_q == q_normalized:
-                await dm.send("⚠️ This riddle has already been submitted. Please try a different one.")
-                return
+    if not current_riddle or current_answer_revealed:
+        return
 
-        await dm.send("💡 Now enter the answer:")
-        a = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
+    submitter_id = current_riddle.get("submitter_id")
+    if user_id == submitter_id:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"⛔ You submitted this riddle and cannot answer it, {message.author.mention}.", delete_after=5)
+        return
 
-        if not q or not a:
-            await dm.send("⚠️ Both question and answer are required.")
-            return
+    if user_id in correct_users:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"✅ You already answered correctly, {message.author.mention}. No more guesses counted.", delete_after=5)
+        return
 
-        uid = str(interaction.user.id)
-        new_id = f"{int(datetime.utcnow().timestamp()*1000)}_{uid}"
-        submitted_questions.append({
-            "id": new_id,
-            "question": q,
-            "answer": a,
-            "submitter_id": uid
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
+    attempts = guess_attempts.get(user_id, 0)
+    if attempts >= 5:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"❌ You are out of guesses for this riddle, {message.author.mention}.", delete_after=5)
+        return
 
-        await dm.send("✅ Your riddle has been submitted and added to the queue!\n⚠️ You will **not** be able to answer your own riddle when it is posted.")
+    guess_attempts[user_id] = attempts + 1
+    guess = content.lower()
+    correct_answer = current_riddle["answer"].lower()
 
-    except asyncio.TimeoutError:
-        await interaction.user.send("⏰ Timed out. Try /submitriddle again.")
+    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
+        correct_users.add(user_id)
+        scores[user_id] = scores.get(user_id, 0) + 1
+        streaks[user_id] = streaks.get(user_id, 0) + 1
+        save_all_scores()
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
+    else:
+        remaining = 5 - guess_attempts[user_id]
+        if remaining == 0 and user_id not in deducted_for_user:
+            scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+            streaks[user_id] = 0
+            deducted_for_user.add(user_id)
+            save_all_scores()
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. You've used all guesses and lost 1 point.", delete_after=8)
+        elif remaining > 0:
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. {remaining} guess(es) left.", delete_after=6)
+        try:
+            await message.delete()
+        except:
+            pass
+
+    now_utc = datetime.now(timezone.utc)
+    now_est = now_utc.astimezone(EST)
+    today_est = now_est.date()
+
+    if today_est == datetime.now(EST).date():
+        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)
+        reveal_dt = reveal_est.astimezone(timezone.utc)
+        delta = max(reveal_dt - now_utc, timedelta(0))
+    else:
+        reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
+        if now_utc >= reveal_dt:
+            reveal_dt += timedelta(days=1)
+        delta = reveal_dt - now_utc
+
+    hours, remainder = divmod(int(delta.total_seconds()), 3600)
+    minutes = remainder // 60
+    countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
+    await message.channel.send(countdown_msg, delete_after=12)
 
 # --- Run bot ---
 if token:
