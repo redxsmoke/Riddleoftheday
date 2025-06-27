@@ -1,0 +1,15 @@
+# Ignore Python virtual environments and cache
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
+venv/
+
+# Git and config files
+.git/
+.gitignore
+
+# OS and editor files
+.DS_Store
+*.swp
