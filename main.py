@@ -5,6 +5,8 @@ import json
 import os
 from datetime import datetime, time, timezone, timedelta
 import random
+from discord import app_commands
+from discord.ui import Modal, TextInput
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -99,7 +101,6 @@ async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
 
-    # Optionally sync only to a guild for fast command registration during dev
     GUILD_ID = os.getenv("DISCORD_GUILD_ID")
     if GUILD_ID:
         guild_obj = discord.Object(id=int(GUILD_ID))
@@ -117,12 +118,10 @@ async def on_ready():
         if channel and not purged_on_startup:
             await purge_channel_messages(channel)
             purged_on_startup = True
-            # Reset riddle state so the bot knows to start fresh
             current_riddle = None
             current_answer_revealed = False
             correct_users.clear()
             guess_attempts.clear()
-            # Post the initial riddle right after purge
             await post_special_riddle()
 
     if not current_riddle:
@@ -175,45 +174,8 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Admin/mod commands: updated listquestions and removequestion to number-based
-    if content == "!listquestions":
-        if not message.author.guild_permissions.manage_guild:
-            await message.channel.send("⛔ You don't have permission to use this command.")
-            return
-
-        if not submitted_questions:
-            await message.channel.send("📭 No riddles found in the queue.")
-            return
-
-        lines = [f"📋 Total riddles: {len(submitted_questions)}"]
-        for idx, q in enumerate(submitted_questions, start=1):
-            lines.append(f"{idx}. {q['question']}")
-        # Send in chunks if very long
-        chunks = [lines[i:i+10] for i in range(0, len(lines), 10)]
-        for chunk in chunks:
-            await message.channel.send("\n".join(chunk))
-        return
-
-    if content.startswith("!removequestion "):
-        if not message.author.guild_permissions.manage_guild:
-            await message.channel.send("⛔ You don't have permission to use this command.")
-            return
-        try:
-            _, num_str = content.split(" ", 1)
-            num = int(num_str.strip())
-            if num < 1 or num > len(submitted_questions):
-                await message.channel.send(f"⚠️ Invalid question number `{num}`. Please use a number between 1 and {len(submitted_questions)}.")
-                return
-            removed_question = submitted_questions.pop(num - 1)
-            save_json(QUESTIONS_FILE, submitted_questions)
-            await message.channel.send(f"✅ Removed riddle #{num}: \"{removed_question['question']}\"")
-        except ValueError:
-            await message.channel.send("⚠️ Please provide a valid number. Usage: `!removequestion <number>`")
-        except Exception as e:
-            await message.channel.send("⚠️ Error removing question.")
-        return
-
     # Commands: run commands, do NOT delete command messages, do NOT count as guesses
+
     if content == "!score":
         score = scores.get(user_id, 0)
         streak = streaks.get(user_id, 0)
@@ -252,8 +214,6 @@ async def on_message(message):
         await message.channel.send(f"✅ Thanks {message.author.mention}, your riddle has been submitted! It will appear in the queue soon.")
         return
 
-    # Slash command /riddleofthedaycommands is handled separately and will not trigger here
-
     # Guessing logic inside the designated channel only
     if current_riddle and not current_answer_revealed:
         # Check if user already answered correctly
@@ -288,7 +248,9 @@ async def on_message(message):
             # Award point only once per user per riddle
             if user_id not in scores:
                 scores[user_id] = 0
-            if user_id not in correct_users:
+            # Prevent awarding multiple points if user guessed correctly before
+            # But current logic seems off: fix to award points only once:
+            if guess_attempts[user_id] == 1:
                 scores[user_id] = max(0, scores.get(user_id, 0) + 1)
                 streaks[user_id] = streaks.get(user_id, 0) + 1
                 save_all_scores()
@@ -327,6 +289,9 @@ async def on_message(message):
                 pass
             return
 
+
+# Slash commands
+
 @tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
@@ -338,7 +303,7 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 """
     await interaction.response.send_message(commands, ephemeral=True)
 
-# Slash command /submitriddle now prompts user step-by-step like Dank Memer's /rob
+
 @tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
 async def submitriddle(interaction: discord.Interaction):
     await interaction.response.send_message("✍️ What's your riddle question? (Check your DMs!)", ephemeral=True)
@@ -375,6 +340,7 @@ async def submitriddle(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         await interaction.followup.send("⏰ You took too long to respond. Please try /submitriddle again.", ephemeral=True)
 
+
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts
@@ -397,6 +363,7 @@ async def post_riddle():
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
 
     await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
 
 @tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
 async def reveal_answer():
@@ -456,15 +423,70 @@ async def show_leaderboard(channel, user_id):
 
     await channel.send(embed=embed)
 
-@client.event
-async def on_error(event_method, *args, **kwargs):
-    import traceback
-    print(f"Error in {event_method}:")
-    traceback.print_exc()
 
-if __name__ == "__main__":
-    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-    if not TOKEN:
-        print("Please set the DISCORD_BOT_TOKEN environment variable")
-        exit(1)
-    client.run(TOKEN)
+# Slash command: /listquestions (admin/mod only)
+@tree.command(name="listquestions", description="List all submitted riddles")
+@app_commands.checks.has_guild_permissions(manage_guild=True)
+async def listquestions(interaction: discord.Interaction):
+    if not submitted_questions:
+        await interaction.response.send_message("📭 No riddles found in the queue.", ephemeral=True)
+        return
+
+    lines = [f"📋 Total riddles: {len(submitted_questions)}"]
+    for idx, q in enumerate(submitted_questions, start=1):
+        lines.append(f"{idx}. {q['question']}")
+
+    chunks = [lines[i:i+10] for i in range(0, len(lines), 10)]
+    await interaction.response.send_message("Listing riddles...", ephemeral=True)
+    for chunk in chunks:
+        await interaction.followup.send("\n".join(chunk), ephemeral=True)
+
+
+# Modal for /removequestion
+class RemoveQuestionModal(Modal, title="Remove a Riddle"):
+
+    question_number = TextInput(
+        label="Enter the number of the riddle to remove",
+        placeholder="e.g. 3",
+        required=True,
+        max_length=5,
+    )
+
+    def __init__(self, interaction: discord.Interaction):
+        super().__init__()
+        self.interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            num = int(self.question_number.value.strip())
+            if num < 1 or num > len(submitted_questions):
+                await interaction.response.send_message(
+                    f"⚠️ Invalid question number `{num}`. Please use a number between 1 and {len(submitted_questions)}.",
+                    ephemeral=True,
+                )
+                return
+            removed_question = submitted_questions.pop(num - 1)
+            save_json(QUESTIONS_FILE, submitted_questions)
+            await interaction.response.send_message(
+                f"✅ Removed riddle #{num}: \"{removed_question['question']}\"",
+                ephemeral=True,
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "⚠️ That doesn't look like a valid number. Please try /removequestion again.",
+                ephemeral=True,
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"⚠️ An error occurred while removing the question: {e}", ephemeral=True
+            )
+
+# Slash command: /removequestion (admin/mod only)
+@tree.command(name="removequestion", description="Remove a submitted riddle by number")
+@app_commands.checks.has_guild_permissions(manage_guild=True)
+async def removequestion(interaction: discord.Interaction):
+    modal = RemoveQuestionModal(interaction)
+    await interaction.response.send_modal(modal)
+
+
+client.run(os.getenv("DISCORD_BOT_TOKEN"))
