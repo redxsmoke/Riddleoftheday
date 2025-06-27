@@ -175,7 +175,7 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
-    # Admin/mod commands
+    # Admin/mod commands: updated listquestions and removequestion to number-based
     if content == "!listquestions":
         if not message.author.guild_permissions.manage_guild:
             await message.channel.send("⛔ You don't have permission to use this command.")
@@ -186,8 +186,8 @@ async def on_message(message):
             return
 
         lines = [f"📋 Total riddles: {len(submitted_questions)}"]
-        for q in submitted_questions:
-            lines.append(f"• ID: `{q['id']}`\n  Q: {q['question']}")
+        for idx, q in enumerate(submitted_questions, start=1):
+            lines.append(f"{idx}. {q['question']}")
         # Send in chunks if very long
         chunks = [lines[i:i+10] for i in range(0, len(lines), 10)]
         for chunk in chunks:
@@ -199,15 +199,16 @@ async def on_message(message):
             await message.channel.send("⛔ You don't have permission to use this command.")
             return
         try:
-            _, qid = content.split(" ", 1)
-            before_count = len(submitted_questions)
-            submitted_questions[:] = [q for q in submitted_questions if q.get("id") != qid.strip()]
-            after_count = len(submitted_questions)
-            if before_count != after_count:
-                save_json(QUESTIONS_FILE, submitted_questions)
-                await message.channel.send(f"✅ Riddle with ID `{qid.strip()}` removed.")
-            else:
-                await message.channel.send(f"⚠️ No riddle found with ID `{qid.strip()}`.")
+            _, num_str = content.split(" ", 1)
+            num = int(num_str.strip())
+            if num < 1 or num > len(submitted_questions):
+                await message.channel.send(f"⚠️ Invalid question number `{num}`. Please use a number between 1 and {len(submitted_questions)}.")
+                return
+            removed_question = submitted_questions.pop(num - 1)
+            save_json(QUESTIONS_FILE, submitted_questions)
+            await message.channel.send(f"✅ Removed riddle #{num}: \"{removed_question['question']}\"")
+        except ValueError:
+            await message.channel.send("⚠️ Please provide a valid number. Usage: `!removequestion <number>`")
         except Exception as e:
             await message.channel.send("⚠️ Error removing question.")
         return
