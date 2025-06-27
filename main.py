@@ -341,8 +341,9 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 async def addpoints(interaction: discord.Interaction, user: discord.User):
     uid = str(user.id)
     scores[uid] = scores.get(uid, 0) + 1
+    streaks[uid] = streaks.get(uid, 0) + 1
     save_all_scores()
-    await interaction.response.send_message(f"✅ Added 1 point to {user.mention}. New score: {scores[uid]}", ephemeral=True)
+    await interaction.response.send_message(f"✅ Added 1 point and 1 streak to {user.mention}. New score: {scores[uid]}, new streak: {streaks[uid]}", ephemeral=True)
 
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
@@ -364,8 +365,7 @@ async def show_leaderboard(channel, user_id):
     page=min(page,total_pages-1)
     embed=discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})",color=discord.Color.gold())
     start=page*10
-    top=sorted_scores[:10]
-    for i,(uid,sv) in enumerate(top,start+1):
+    for i,(uid,sv) in enumerate(sorted_scores[start:start+10],start=start+1):
         try:
             user=await client.fetch_user(int(uid))
             st=streaks.get(uid,0)
@@ -377,41 +377,32 @@ async def show_leaderboard(channel, user_id):
 @tasks.loop(time=time(19,15,tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle,current_answer_revealed,correct_users,guess_attempts,deducted_for_user
-    ch=int(os.getenv("DISCORD_CHANNEL_ID","0"))
-    channel=client.get_channel(ch)
+    ch=int(os.getenv("DISCORD_CHANNEL_ID","0")); channel=client.get_channel(ch)
     if not channel: return
-    current_riddle=pick_next_riddle()
-    current_answer_revealed=False
+    current_riddle=pick_next_riddle(); current_answer_revealed=False
     correct_users.clear(); guess_attempts.clear(); deducted_for_user.clear()
     txt=format_question_text(current_riddle)
-    sid=current_riddle.get("submitter_id")
-    stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+    sid=current_riddle.get("submitter_id"); stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
     await channel.send(f"{txt}\n\n_(Submitted by: {stext})_")
 
 @tasks.loop(time=time(0,0,tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
     if not current_riddle or current_answer_revealed: return
-    ch=int(os.getenv("DISCORD_CHANNEL_ID","0"))
-    channel=client.get_channel(ch)
+    ch=int(os.getenv("DISCORD_CHANNEL_ID","0")); channel=client.get_channel(ch)
     if not channel: return
-    current_answer_revealed=True
-    ans=current_riddle["answer"]
+    current_answer_revealed=True; ans=current_riddle["answer"]
     lines=[f"✅ The correct answer was: **{ans}**"]
     if correct_users:
         lines.append("🎉 Congratulations to the following solvers:")
         for uid in correct_users:
-            try:
-                u=await client.fetch_user(int(uid)); lines.append(f"• {u.display_name}")
+            try: u=await client.fetch_user(int(uid)); lines.append(f"• {u.display_name}")
             except: lines.append("• Unknown user")
-    else:
-        lines.append("No one guessed correctly this time.")
-    sid=current_riddle.get("submitter_id")
-    stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+    else: lines.append("No one guessed correctly this time.")
+    sid=current_riddle.get("submitter_id"); stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
     lines.append(f"\n_(Riddle submitted by: {stext})_")
     await channel.send("\n".join(lines))
 
-# --- Run Bot ---
 DISCORD_BOT_TOKEN=os.getenv("DISCORD_BOT_TOKEN")
 if not DISCORD_BOT_TOKEN:
     print("Please set the DISCORD_BOT_TOKEN environment variable!")
