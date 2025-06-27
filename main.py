@@ -7,17 +7,37 @@ from datetime import datetime, time, timezone, timedelta
 import random
 from discord import app_commands
 
+# --- Timezone Setup ---
+EST = timezone(timedelta(hours=-5))  # EST fixed offset UTC-5 (no DST)
+
+# --- Global Variables ---
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# Files
 QUESTIONS_FILE = "submitted_questions.json"
 SCORES_FILE = "scores.json"
 STREAKS_FILE = "streaks.json"
 
-# Load or initialize data stores
+submitted_questions = []
+scores = {}
+streaks = {}
+
+used_question_ids = set()
+current_riddle = None
+current_answer_revealed = False
+correct_users = set()
+guess_attempts = {}  # user_id -> guesses this riddle
+deducted_for_user = set()  # users who lost 1 point this riddle
+
+leaderboard_pages = {}
+
+# Store the initial EST date when bot starts (for countdown logic)
+INITIAL_DAY_EST = datetime.now(EST).date()
+
+# --- Helper functions ---
+
 def load_json(file):
     if os.path.exists(file):
         with open(file, "r", encoding="utf-8") as f:
@@ -28,18 +48,9 @@ def save_json(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-submitted_questions = load_json(QUESTIONS_FILE)
-scores = load_json(SCORES_FILE)
-streaks = load_json(STREAKS_FILE)
-
-used_question_ids = set()
-current_riddle = None
-current_answer_revealed = False
-correct_users = set()
-guess_attempts = {}  # user_id -> guesses used this riddle
-deducted_for_user = set()  # users who lost 1 point this riddle
-
-leaderboard_pages = {}
+def save_all_scores():
+    save_json(SCORES_FILE, scores)
+    save_json(STREAKS_FILE, streaks)
 
 def get_rank(score, streak):
     if streak >= 3:
@@ -55,19 +66,6 @@ def get_rank(score, streak):
     else:
         return "Sushi Einstein 🧪"
 
-def get_top_scorers():
-    if not scores:
-        return []
-    max_score = max(scores.values())
-    return [uid for uid, s in scores.items() if s == max_score and max_score > 0]
-
-def format_question_text(qdict):
-    base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
-    remaining = count_unused_questions()
-    if remaining < 5:
-        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
-    return base
-
 def count_unused_questions():
     return len([q for q in submitted_questions if q.get("id") not in used_question_ids])
 
@@ -80,10 +78,19 @@ def pick_next_riddle():
     used_question_ids.add(riddle["id"])
     return riddle
 
-def save_all_scores():
-    save_json(SCORES_FILE, scores)
-    save_json(STREAKS_FILE, streaks)
+def format_question_text(qdict):
+    base = f"@everyone {qdict['question']} ***(Answer will be revealed later this evening)***"
+    remaining = count_unused_questions()
+    if remaining < 5:
+        base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
+    return base
 
+# --- Load data ---
+submitted_questions = load_json(QUESTIONS_FILE)
+scores = load_json(SCORES_FILE)
+streaks = load_json(STREAKS_FILE)
+
+# --- Purge channel messages on startup (optional) ---
 async def purge_channel_messages(channel):
     print(f"Purging all messages in channel: {channel.name} ({channel.id}) for clean test")
     try:
@@ -92,6 +99,8 @@ async def purge_channel_messages(channel):
         print("Channel purge complete.")
     except Exception as e:
         print(f"Error during purge: {e}")
+
+# --- Events ---
 
 @client.event
 async def on_ready():
@@ -115,10 +124,10 @@ async def on_ready():
     else:
         channel = client.get_channel(channel_id)
         if channel:
-            # Purge once on startup if desired
+            # Purge messages once on startup (optional)
             await purge_channel_messages(channel)
 
-    # Initialize riddle state if none
+    # Initialize riddle if none
     if not current_riddle:
         await post_special_riddle()
 
@@ -203,8 +212,8 @@ async def on_message(message):
             await message.delete()
         except:
             pass
-        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}", delete_after=8)
-
+        # Send correct confirmation WITHOUT delete_after so message stays
+        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}")
     else:
         remaining = 5 - guess_attempts[user_id]
         if remaining == 0 and user_id not in deducted_for_user:
@@ -220,86 +229,74 @@ async def on_message(message):
         except:
             pass
 
-    # Calculate time until answer reveal and send countdown message
+    # --- Countdown message logic ---
     now_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    now_est = now_utc.astimezone(EST)
+    today_est = now_est.date()
 
-    today_utc = now_utc.date()
-    reveal_time_today = datetime.combine(today_utc + timedelta(days=1), time(hour=1, minute=0, tzinfo=timezone.utc))
-    reveal_time_tomorrow = datetime.combine(today_utc, time(hour=23, minute=0, tzinfo=timezone.utc))
-    post_time_tomorrow = datetime.combine(today_utc, time(hour=7, minute=0, tzinfo=timezone.utc))
-
-    if now_utc < post_time_tomorrow:
-        reveal_dt = reveal_time_today
+    if today_est == INITIAL_DAY_EST:
+        # Today only: countdown to 9:00 PM EST today
+        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)  # 9 PM EST today
+        reveal_dt = reveal_est.astimezone(timezone.utc)
+        if now_utc >= reveal_dt:
+            delta = timedelta(seconds=0)
+        else:
+            delta = reveal_dt - now_utc
     else:
-        reveal_dt = reveal_time_tomorrow
+        # Starting tomorrow: countdown to 23:00 UTC today or next day if past 23:00 UTC
+        reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
+        if now_utc >= reveal_dt:
+            reveal_dt += timedelta(days=1)
+        delta = reveal_dt - now_utc
 
-    if reveal_dt <= now_utc:
-        reveal_dt += timedelta(days=1)
-
-    delta = reveal_dt - now_utc
     hours, remainder = divmod(int(delta.total_seconds()), 3600)
     minutes = remainder // 60
-
     countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
     await message.channel.send(countdown_msg, delete_after=12)
 
-# --- PAGINATED LISTQUESTIONS COMMAND ---
+# --- /listquestions with pagination ---
 
-class ListQuestionsView(discord.ui.View):
-    def __init__(self, user_id, questions, per_page=10, timeout=180):
-        super().__init__(timeout=timeout)
+class QuestionListView(discord.ui.View):
+    def __init__(self, user_id, questions, per_page=10):
+        super().__init__(timeout=300)  # 5 minutes timeout
         self.user_id = user_id
         self.questions = questions
         self.per_page = per_page
         self.current_page = 0
-        self.total_pages = max(1, (len(self.questions) - 1) // self.per_page + 1)
-
-        # Disable prev button on first page
-        self.prev_button.disabled = True
-        if self.total_pages <= 1:
-            self.next_button.disabled = True
+        self.total_pages = (len(questions) - 1) // per_page + 1 if questions else 1
 
     def get_page_content(self):
         start = self.current_page * self.per_page
         end = start + self.per_page
         page_questions = self.questions[start:end]
-        lines = [f"📋 Total riddles: {len(self.questions)}\n"]
+
+        lines = [f"📋 Total riddles: {len(self.questions)}"]
         for idx, q in enumerate(page_questions, start=start + 1):
             lines.append(f"{idx}. {q['question']}")
         return "\n".join(lines)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    async def update_message(self, interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("⚠️ You cannot control this pagination.", ephemeral=True)
-            return False
-        return True
+            await interaction.response.send_message("⛔ This pagination isn't for you.", ephemeral=True)
+            return
+        content = self.get_page_content()
+        await interaction.response.edit_message(content=content, view=self)
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.primary, disabled=True)
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_page > 0:
             self.current_page -= 1
-            # Enable/disable buttons accordingly
-            self.next_button.disabled = False
-            if self.current_page == 0:
-                button.disabled = True
-            self.update_buttons()
-            await interaction.response.edit_message(content=self.get_page_content(), view=self)
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("⛔ Already at the first page.", ephemeral=True)
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
-            # Enable/disable buttons accordingly
-            self.prev_button.disabled = False
-            if self.current_page == self.total_pages - 1:
-                button.disabled = True
-            self.update_buttons()
-            await interaction.response.edit_message(content=self.get_page_content(), view=self)
-
-    def update_buttons(self):
-        # Sync button disabled states
-        self.prev_button.disabled = (self.current_page == 0)
-        self.next_button.disabled = (self.current_page == self.total_pages - 1)
+            await self.update_message(interaction)
+        else:
+            await interaction.response.send_message("⛔ Already at the last page.", ephemeral=True)
 
 @tree.command(name="listquestions", description="List all submitted riddles")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -308,10 +305,11 @@ async def listquestions(interaction: discord.Interaction):
         await interaction.response.send_message("📭 No riddles found in the queue.", ephemeral=True)
         return
 
-    view = ListQuestionsView(user_id=interaction.user.id, questions=submitted_questions, per_page=10)
-    await interaction.response.send_message(content=view.get_page_content(), view=view, ephemeral=True)
+    view = QuestionListView(interaction.user.id, submitted_questions)
+    content = view.get_page_content()
+    await interaction.response.send_message(content=content, view=view, ephemeral=True)
 
-# --- Rest of commands unchanged ---
+# --- Other commands ---
 
 @tree.command(name="removequestion", description="Remove a submitted riddle by number")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -426,21 +424,91 @@ async def submitriddle(interaction: discord.Interaction):
 @tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands = """
-**Available Riddle Bot Commands**
-/submitriddle - Submit a new riddle via DM prompt
-/listquestions - List all submitted riddles (admin only)
-/removequestion - Remove a riddle by number (admin only)
-/score - Show your score and rank
-/leaderboard - Show the top solvers
+**Available Riddle Bot Commands:**
+• `/score` – View your score and rank.
+• `/submitriddle` – Submit a new riddle using the modal form.
+• `/leaderboard` – Show the top solvers.
+• `/listquestions` – List all submitted riddles (admin only).
+• `/removequestion` – Remove a riddle by number (admin only).
+• Just type your guess to answer the riddle!
 """
     await interaction.response.send_message(commands, ephemeral=True)
 
-# TODO: Your scheduled tasks for posting riddles and revealing answers here (post_riddle, reveal_answer)
+# --- Scheduled Tasks ---
 
-# Run bot
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_TOKEN:
-    print("DISCORD_BOT_TOKEN environment variable is missing.")
-    exit(1)
+@tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
+async def post_riddle():
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
 
-client.run(DISCORD_TOKEN)
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Channel not found.")
+        return
+
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+
+    question_text = format_question_text(current_riddle)
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
+@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
+async def reveal_answer():
+    global current_answer_revealed
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+
+    channel = client.get_channel(channel_id)
+    if not channel or not current_riddle:
+        return
+
+    current_answer_revealed = True
+    correct_answer = current_riddle["answer"]
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    if correct_users:
+        lines = [f"✅ The correct answer was: **{correct_answer}**"]
+        lines.append("🎉 Congratulations to the following solvers:")
+        for uid in correct_users:
+            try:
+                user = await client.fetch_user(int(uid))
+                lines.append(f"• {user.display_name}")
+            except Exception:
+                lines.append("• Unknown user")
+    else:
+        lines = [f"⚠️ The correct answer was: **{correct_answer}**"]
+        lines.append("No one guessed correctly this time.")
+
+    lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
+    await channel.send("\n".join(lines))
+
+# --- Error Handling ---
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("⛔ You don't have permission to run this command.", ephemeral=True)
+    else:
+        raise error
+
+# --- Run Bot ---
+
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+if not DISCORD_BOT_TOKEN:
+    print("Please set the DISCORD_BOT_TOKEN environment variable!")
+else:
+    client.run(DISCORD_BOT_TOKEN)
