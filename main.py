@@ -50,6 +50,9 @@ def save_all_scores():
     save_json(STREAKS_FILE, streaks)
 
 def get_rank(score, streak):
+    max_score = max(scores.values()) if scores else 0
+    if score == max_score and score > 0:
+        return "👨‍🍳 Master Sushi Chef"
     if streak >= 3:
         return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
     if score <= 5:
@@ -190,11 +193,8 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
 
     async def on_submit(self, interaction: discord.Interaction):
         global max_id
-        # Replace any line breaks with a space to store question as single line
         q = self.question.value.strip().replace("\n", " ").replace("\r", " ")
         a = self.answer.value.strip()
-
-        # Check for duplicates ignoring spaces and case
         q_normalized = q.lower().replace(" ", "")
         for existing in submitted_questions:
             existing_q = existing["question"].strip().lower().replace(" ", "")
@@ -211,11 +211,17 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             "submitter_id": uid
         })
         save_json(QUESTIONS_FILE, submitted_questions)
+
+        # Award point to submitter
+        scores[uid] = scores.get(uid, 0) + 1
+        save_json(SCORES_FILE, scores)
+
         try:
             dm = await interaction.user.create_dm()
             await dm.send(
                 "✅ Thanks for submitting a riddle! It is now in the queue.\n"
-                "⚠️ You will **not** be able to answer your own riddle when it is posted."
+                "⚠️ You will **not** be able to answer your own riddle when it is posted.\n"
+                "🏅 You’ve also been awarded **1 point** for your submission!"
             )
         except discord.Forbidden:
             pass
@@ -237,6 +243,19 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
     save_all_scores()
     await interaction.response.send_message(
         f"✅ Added 1 point and 1 streak to {user.mention}. New score: {scores[uid]}, new streak: {streaks[uid]}",
+        ephemeral=True
+    )
+
+@tree.command(name="removepoint", description="Remove 1 point from a user's score")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(user="The user to deduct a point from")
+async def removepoint(interaction: discord.Interaction, user: discord.User):
+    uid = str(user.id)
+    scores[uid] = max(0, scores.get(uid, 0) - 1)
+    streaks[uid] = 0
+    save_all_scores()
+    await interaction.response.send_message(
+        f"⚠️ Removed 1 point from {user.mention}. New score: {scores[uid]}. Streak has been reset to 0.",
         ephemeral=True
     )
 
@@ -349,7 +368,7 @@ async def on_message(message):
 
 # --- Scheduled tasks ---
 
-@tasks.loop(time=time(6, 55, tzinfo=timezone.utc))
+@tasks.loop(time=time(18, 55, tzinfo=timezone.utc))  # Changed from 06:55 to 18:55 UTC
 async def daily_purge():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
@@ -363,14 +382,14 @@ async def daily_purge():
     except Exception as e:
         print(f"Error during purge: {e}")
 
-@tasks.loop(time=time(6, 57, tzinfo=timezone.utc))
+@tasks.loop(time=time(18, 57, tzinfo=timezone.utc))  # Changed from 06:57 to 18:57 UTC
 async def notify_upcoming_riddle():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if channel:
         await channel.send("⏳ The next riddle will be posted soon!")
 
-@tasks.loop(time=time(7, 0, tzinfo=timezone.utc))
+@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))  # Changed from 07:00 to 19:00 UTC
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
@@ -411,6 +430,7 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 • `/score` - View your current score and rank.
 • `/leaderboard` - Show the top solvers.
 • `/addpoints` - (Admin) Add a point to a user.
+• `/removepoint` - (Admin) Remove a point from a user.
 • `/riddleofthedaycommands` - Show this list of commands.
 """
     await interaction.response.send_message(commands_list, ephemeral=True)
