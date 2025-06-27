@@ -174,7 +174,7 @@ async def on_message(message):
             await message.delete()
         except:
             pass
-        await message.channel.send(f"❌ You cannot answer your own riddle, {message.author.mention}.", delete_after=6)
+        await message.channel.send(f"❌ Sorry {message.author.mention}, you cannot answer your own riddle.", delete_after=6)
         return
 
     if user_id in correct_users:
@@ -321,10 +321,21 @@ async def submitriddle(interaction: discord.Interaction):
         dm = await interaction.user.create_dm()
         await dm.send("✍️ Please enter your riddle question:")
         q = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
+        # Normalize new question text for comparison
+        q_norm = q.lower()
+
+        # Check for duplicate question text (case-insensitive)
+        for existing in submitted_questions:
+            existing_q_norm = existing.get("question", "").lower().strip()
+            if q_norm == existing_q_norm:
+                await dm.send("⚠️ This riddle has already been submitted. Please try submitting a different one.")
+                return
+
         await dm.send("💡 Now enter the answer:")
         a = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
         if not q or not a:
-            await dm.send("⚠️ Both question and answer required."); return
+            await dm.send("⚠️ Both question and answer required.")
+            return
         uid = str(interaction.user.id)
         new_id = f"{int(datetime.utcnow().timestamp()*1000)}_{uid}"
         submitted_questions.append({"id": new_id,"question":q,"answer":a,"submitter_id":uid})
