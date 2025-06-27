@@ -462,8 +462,8 @@ async def on_error(event_method, *args, **kwargs):
     traceback.print_exc()
 
 if __name__ == "__main__":
-    TOKEN = os.getenv("DISCORD_TOKEN")
+    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     if not TOKEN:
-        print("Please set the DISCORD_TOKEN environment variable")
+        print("Please set the DISCORD_BOT_TOKEN environment variable")
         exit(1)
     client.run(TOKEN)
