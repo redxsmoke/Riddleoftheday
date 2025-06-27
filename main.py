@@ -216,6 +216,12 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         })
         save_json(QUESTIONS_FILE, submitted_questions)
 
+        # Notify admins and moderators
+        ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+        channel = client.get_channel(ch_id)
+        if channel:
+            await channel.send("🧠 @𝐈𝐳𝐳𝐲𝐁𝐚𝐧 has submitted a new Riddle of the Day. Use /listquestions to view the question and /removequestion if moderation is needed.")
+
         # Award point to submitter only once per day
         today = date.today()
         last_award_date = submission_dates.get(uid)
