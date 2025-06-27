@@ -30,7 +30,7 @@ deducted_for_user = set()  # users who lost 1 point this riddle
 
 leaderboard_pages = {}
 
-max_id = 0  # Highest numeric ID assigned so far (int)
+max_id = 0  # Will track max ID assigned (string IDs)
 
 # --- Helper functions ---
 
@@ -75,29 +75,22 @@ def pick_next_riddle():
     return riddle
 
 def format_question_text(qdict):
-    base = f"@everyone [{qdict.get('id','NA')}] {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
+    base = f"@everyone {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
     remaining = count_unused_questions()
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
     return base
 
 # --- Load data ---
-
 submitted_questions = load_json(QUESTIONS_FILE)
 scores = load_json(SCORES_FILE)
 streaks = load_json(STREAKS_FILE)
 
-# Initialize max_id from existing question IDs (assumes numeric string IDs)
-for q in submitted_questions:
-    try:
-        qid = int(q["id"])
-        if qid > max_id:
-            max_id = qid
-    except Exception:
-        pass  # Ignore non-integer IDs
+# Initialize max_id from submitted questions
+if submitted_questions:
+    max_id = max(int(q.get("id", "0")) for q in submitted_questions if str(q.get("id", "0")).isdigit())
 
 # --- /listquestions command ---
-
 class QuestionListView(discord.ui.View):
     def __init__(self, user_id, questions, per_page=10):
         super().__init__(timeout=300)
@@ -113,7 +106,8 @@ class QuestionListView(discord.ui.View):
         page_questions = self.questions[start:end]
         lines = [f"📋 Total riddles: {len(self.questions)}"]
         for q in page_questions:
-            lines.append(f"[{q.get('id','NA')}] {q['question']}")
+            q_id = q.get("id", "NA")
+            lines.append(f"{q_id}. {q['question']}")
         return "\n".join(lines)
 
     async def update_message(self, interaction):
@@ -148,79 +142,88 @@ async def listquestions(interaction: discord.Interaction):
     view = QuestionListView(interaction.user.id, submitted_questions)
     await interaction.followup.send(content=view.get_page_content(), view=view, ephemeral=True)
 
-# --- /removequestion command ---
-
 @tree.command(name="removequestion", description="Remove a submitted riddle by ID")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def removequestion(interaction: discord.Interaction):
     class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
         question_id = discord.ui.TextInput(
             label="Enter the ID of the riddle to remove", 
-            placeholder="e.g. 5", 
+            placeholder="e.g. 3", 
             required=True, 
             max_length=10
         )
         async def on_submit(self, modal_interaction: discord.Interaction):
             qid = self.question_id.value.strip()
-            found_index = next((i for i, q in enumerate(submitted_questions) if q.get("id") == qid), None)
-            if found_index is None:
-                await modal_interaction.response.send_message(f"⚠️ No riddle found with ID `{qid}`.", ephemeral=True)
-                return
-            removed = submitted_questions.pop(found_index)
-            save_json(QUESTIONS_FILE, submitted_questions)
-            # Also remove from used_question_ids if present
-            used_question_ids.discard(qid)
-            await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
+            # Find and remove question by ID
+            for i, q in enumerate(submitted_questions):
+                if q.get("id") == qid:
+                    removed = submitted_questions.pop(i)
+                    save_json(QUESTIONS_FILE, submitted_questions)
+                    await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
+                    # Also remove from used_question_ids if present
+                    used_question_ids.discard(qid)
+                    return
+            await modal_interaction.response.send_message(f"⚠️ No riddle found with ID `{qid}`.", ephemeral=True)
     await interaction.response.send_modal(RemoveQuestionModal())
 
-# --- /submitriddle command ---
-
-@tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
+# --- /submitriddle command using Modal ---
+@tree.command(name="submitriddle", description="Submit a new riddle via a form")
 async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
+        question = discord.ui.TextInput(
+            label="Riddle Question",
+            style=discord.TextStyle.paragraph,
+            placeholder="Enter your riddle question here (supports multiple lines)",
+            required=True,
+            max_length=1000,
+        )
+        answer = discord.ui.TextInput(
+            label="Riddle Answer",
+            style=discord.TextStyle.paragraph,
+            placeholder="Enter the answer here",
+            required=True,
+            max_length=500,
+        )
 
-    def check(m): return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
-
-    try:
-        dm = await interaction.user.create_dm()
-        await dm.send("✍️ Please enter your riddle question:")
-
-        q = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
-        q_normalized = q.lower().replace(" ", "")
-        for existing in submitted_questions:
-            existing_q = existing["question"].strip().lower().replace(" ", "")
-            if existing_q == q_normalized:
-                await dm.send("⚠️ This riddle has already been submitted. Please try a different one.")
+        async def on_submit(self, modal_interaction: discord.Interaction):
+            q = self.question.value.strip()
+            a = self.answer.value.strip()
+            if not q or not a:
+                await modal_interaction.response.send_message("⚠️ Both question and answer are required.", ephemeral=True)
                 return
 
-        await dm.send("💡 Now enter the answer:")
-        a = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
+            # Check for duplicate question (case insensitive, ignoring whitespace)
+            q_normalized = q.lower().replace(" ", "")
+            for existing in submitted_questions:
+                existing_q = existing["question"].strip().lower().replace(" ", "")
+                if existing_q == q_normalized:
+                    await modal_interaction.response.send_message("⚠️ This riddle has already been submitted. Please try a different one.", ephemeral=True)
+                    return
 
-        if not q or not a:
-            await dm.send("⚠️ Both question and answer are required.")
-            return
+            global max_id
+            max_id += 1
+            new_id = str(max_id)
 
-        global max_id
-        max_id += 1
-        new_id = str(max_id)
-        uid = str(interaction.user.id)
-        submitted_questions.append({
-            "id": new_id,
-            "question": q,
-            "answer": a,
-            "submitter_id": uid
-        })
-        save_json(QUESTIONS_FILE, submitted_questions)
+            uid = str(modal_interaction.user.id)
+            submitted_questions.append({
+                "id": new_id,
+                "question": q,
+                "answer": a,
+                "submitter_id": uid
+            })
+            save_json(QUESTIONS_FILE, submitted_questions)
 
-        await dm.send("✅ Your riddle has been submitted and added to the queue!\n⚠️ You will **not** be able to answer your own riddle when it is posted.")
-        await interaction.followup.send("✅ Riddle submitted via DM!", ephemeral=True)
+            await modal_interaction.response.send_message(
+                "✅ Your riddle has been submitted and added to the queue!\n⚠️ You will **not** be able to answer your own riddle when it is posted.",
+                ephemeral=True
+            )
+            try:
+                dm = await modal_interaction.user.create_dm()
+                await dm.send("✅ Thanks for submitting a riddle! It is now in the queue.")
+            except discord.Forbidden:
+                pass
 
-    except asyncio.TimeoutError:
-        await interaction.followup.send("⏰ Timed out. Try /submitriddle again.", ephemeral=True)
-    except discord.Forbidden:
-        await interaction.followup.send("❌ I couldn’t DM you. Please enable DMs from server members and try again.", ephemeral=True)
-
-# --- /addpoints command ---
+    await interaction.response.send_modal(SubmitRiddleModal())
 
 @tree.command(name="addpoints", description="Add 1 point to a user's score")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -235,8 +238,6 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
         ephemeral=True
     )
 
-# --- /score command ---
-
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     uid = str(interaction.user.id)
@@ -246,8 +247,6 @@ async def score(interaction: discord.Interaction):
         f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv, st)}",
         ephemeral=True
     )
-
-# --- /leaderboard command ---
 
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
@@ -271,8 +270,6 @@ async def show_leaderboard(channel, user_id):
         except:
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
-
-# --- on_message event for guesses ---
 
 @client.event
 async def on_message(message):
@@ -426,20 +423,21 @@ async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     guild_id = int(os.getenv("DISCORD_GUILD_ID") or 0)
     if guild_id:
-        await tree.sync(guild=discord.Object(id=guild_id))
-        print(f"Commands synced to guild {guild_id}.")
+        guild = discord.Object(id=guild_id)
+        await tree.sync(guild=guild)
+        print(f"Synced commands to guild {guild_id}.")
     else:
         await tree.sync()
-        print("Commands synced globally.")
+        print("Synced global commands.")
+
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
     reveal_answer.start()
 
-# --- Run bot ---
-
-DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_TOKEN:
+# --- Run the bot ---
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+if not TOKEN:
     print("Error: DISCORD_BOT_TOKEN environment variable not set.")
 else:
-    client.run(DISCORD_TOKEN)
+    client.run(TOKEN)
