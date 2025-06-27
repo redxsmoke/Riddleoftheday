@@ -127,7 +127,6 @@ async def on_ready():
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
 
     await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-
     await asyncio.sleep(60)  # Wait 1 minute
 
     current_answer_revealed = True
@@ -221,7 +220,7 @@ async def on_message(message):
     today_est = now_est.date()
 
     if today_est == datetime.now(EST).date():
-        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)  # 9 PM EST
+        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)
         reveal_dt = reveal_est.astimezone(timezone.utc)
         delta = max(reveal_dt - now_utc, timedelta(0))
     else:
@@ -260,8 +259,7 @@ class QuestionListView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("⛔ This pagination isn't for you.", ephemeral=True)
             return
-        content = self.get_page_content()
-        await interaction.response.edit_message(content=content, view=self)
+        await interaction.response.edit_message(content=self.get_page_content(), view=self)
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -285,202 +283,136 @@ async def listquestions(interaction: discord.Interaction):
     if not submitted_questions:
         await interaction.response.send_message("📭 No riddles found in the queue.", ephemeral=True)
         return
-
     view = QuestionListView(interaction.user.id, submitted_questions)
-    content = view.get_page_content()
-    await interaction.response.send_message(content=content, view=view, ephemeral=True)
-
-# --- Remove question modal ---
+    await interaction.response.send_message(content=view.get_page_content(), view=view, ephemeral=True)
 
 @tree.command(name="removequestion", description="Remove a submitted riddle by number")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def removequestion(interaction: discord.Interaction):
     class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
-        question_number = discord.ui.TextInput(
-            label="Enter the number of the riddle to remove",
-            placeholder="e.g. 3",
-            required=True,
-            max_length=5
-        )
-
+        question_number = discord.ui.TextInput(label="Enter the number of the riddle to remove", placeholder="e.g. 3", required=True, max_length=5)
         async def on_submit(self, modal_interaction: discord.Interaction):
             try:
                 num = int(self.question_number.value.strip())
                 if num < 1 or num > len(submitted_questions):
-                    await modal_interaction.response.send_message(
-                        f"⚠️ Invalid question number `{num}`. Please provide a number between 1 and {len(submitted_questions)}.",
-                        ephemeral=True
-                    )
+                    await modal_interaction.response.send_message(f"⚠️ Invalid question number `{num}`.", ephemeral=True)
                     return
                 removed = submitted_questions.pop(num - 1)
                 save_json(QUESTIONS_FILE, submitted_questions)
                 await modal_interaction.response.send_message(f"✅ Removed riddle #{num}: \"{removed['question']}\"", ephemeral=True)
-            except ValueError:
-                await modal_interaction.response.send_message("⚠️ Please enter a valid number.", ephemeral=True)
-
+            except:
+                await modal_interaction.response.send_message("⚠️ Invalid input.", ephemeral=True)
     await interaction.response.send_modal(RemoveQuestionModal())
-
-# --- Score command ---
-
-@tree.command(name="score", description="View your score and rank")
-async def score(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    score_val = scores.get(user_id, 0)
-    streak_val = streaks.get(user_id, 0)
-    rank = get_rank(score_val, streak_val)
-    await interaction.response.send_message(
-        f"📊 {interaction.user.display_name}'s score: **{score_val}**, 🔥 Streak: {streak_val}\n🏅 Rank: {rank}",
-        ephemeral=True
-    )
-
-# --- Leaderboard command ---
-
-@tree.command(name="leaderboard", description="Show the top solvers")
-async def leaderboard(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    leaderboard_pages[user_id] = 0
-    await show_leaderboard(interaction.channel, user_id)
-    await interaction.response.send_message("📋 Showing leaderboard...", ephemeral=True)
-
-async def show_leaderboard(channel, user_id):
-    page = leaderboard_pages.get(user_id, 0)
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
-    page = min(page, total_pages - 1)
-
-    embed = discord.Embed(
-        title=f"🏆 Riddle Leaderboard (Page {page + 1}/{total_pages})",
-        description="Top riddle solvers by total correct guesses",
-        color=discord.Color.gold()
-    )
-
-    start = page * 10
-    top_score = sorted_scores[0][1] if sorted_scores else 0
-    top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
-
-    for i, (uid, score_val) in enumerate(sorted_scores[start:start + 10], start=start + 1):
-        try:
-            user = await client.fetch_user(int(uid))
-            streak_val = streaks.get(uid, 0)
-            rank = get_rank(score_val, streak_val)
-            extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
-            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {score_val} | Streak: {streak_val}\nRank: {rank}{extra}", inline=False)
-        except Exception:
-            embed.add_field(name=f"{i}. Unknown user", value=f"Score: {score_val}", inline=False)
-
-    await channel.send(embed=embed)
-
-# --- Submit riddle command ---
 
 @tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
 async def submitriddle(interaction: discord.Interaction):
     await interaction.response.send_message("✍️ Check your DMs to submit a riddle!", ephemeral=True)
-
-    def check(m):
-        return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
-
+    def check(m): return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
     try:
-        dm_channel = await interaction.user.create_dm()
-        await dm_channel.send("✍️ Please enter your riddle question:")
-        question_msg = await client.wait_for('message', timeout=120.0, check=check)
-        question = question_msg.content.strip()
-
-        await dm_channel.send("💡 Now enter the answer to your riddle:")
-        answer_msg = await client.wait_for('message', timeout=120.0, check=check)
-        answer = answer_msg.content.strip()
-
-        if not question or not answer:
-            await dm_channel.send("⚠️ Invalid submission. Both question and answer must be provided.")
-            return
-
-        user_id = str(interaction.user.id)
-        new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
-        submitted_questions.append({
-            "id": new_id,
-            "question": question,
-            "answer": answer,
-            "submitter_id": user_id
-        })
+        dm = await interaction.user.create_dm()
+        await dm.send("✍️ Please enter your riddle question:")
+        q = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
+        await dm.send("💡 Now enter the answer:")
+        a = (await client.wait_for('message', timeout=120.0, check=check)).content.strip()
+        if not q or not a:
+            await dm.send("⚠️ Both question and answer required."); return
+        uid = str(interaction.user.id)
+        new_id = f"{int(datetime.utcnow().timestamp()*1000)}_{uid}"
+        submitted_questions.append({"id": new_id,"question":q,"answer":a,"submitter_id":uid})
         save_json(QUESTIONS_FILE, submitted_questions)
-        await dm_channel.send("✅ Your riddle has been submitted and will appear soon!")
-
+        await dm.send("✅ Your riddle has been submitted!")
     except asyncio.TimeoutError:
-        await interaction.user.send("⏰ Submission timed out. Please try again with /submitriddle.")
-
-# --- The fixed riddleofthedaycommands command ---
+        await interaction.user.send("⏰ Timed out. Try /submitriddle again.")
 
 @tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
     commands_list = (
         "**Available Riddle of the Day Commands:**\n"
-        "• `/score` – View your score and rank.\n"
-        "• `/submitriddle` – Submit a new riddle via DM.\n"
-        "• `/leaderboard` – Show the top solvers.\n"
-        "• `/listquestions` – List all submitted riddles (admin only).\n"
-        "• `/removequestion` – Remove a riddle by number (admin only).\n"
-        "• Just type your guess to answer the riddle!\n"
+        "• `/score`\n• `/submitriddle`\n• `/leaderboard`\n"
+        "• `/listquestions` (admin)\n• `/removequestion` (admin)\n"
+        "• `/addpoints` (admin)\n"
+        "• Type your guess to answer!\n"
     )
     await interaction.response.send_message(commands_list, ephemeral=True)
 
-# --- Scheduled Tasks ---
+@tree.command(name="addpoints", description="Add 1 point to a user's score")
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(user="The user to award a point to")
+async def addpoints(interaction: discord.Interaction, user: discord.User):
+    uid = str(user.id)
+    scores[uid] = scores.get(uid, 0) + 1
+    save_all_scores()
+    await interaction.response.send_message(f"✅ Added 1 point to {user.mention}. New score: {scores[uid]}", ephemeral=True)
 
-@tasks.loop(time=time(19, 15, tzinfo=timezone.utc))  # 7:15 PM UTC daily post time
+@tree.command(name="score", description="View your score and rank")
+async def score(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    sv = scores.get(uid,0); st=streaks.get(uid,0)
+    await interaction.response.send_message(f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv,st)}",ephemeral=True)
+
+@tree.command(name="leaderboard", description="Show the top solvers")
+async def leaderboard(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    leaderboard_pages[uid]=0
+    await show_leaderboard(interaction.channel,uid)
+    await interaction.response.send_message("📋 Showing leaderboard...",ephemeral=True)
+
+async def show_leaderboard(channel, user_id):
+    sorted_scores = sorted(scores.items(),key=lambda x:x[1],reverse=True)
+    total_pages = max((len(sorted_scores)-1)//10+1,1)
+    page = leaderboard_pages.get(user_id,0)
+    page=min(page,total_pages-1)
+    embed=discord.Embed(title=f"🏆 Riddle Leaderboard ({page+1}/{total_pages})",color=discord.Color.gold())
+    start=page*10
+    top=sorted_scores[:10]
+    for i,(uid,sv) in enumerate(top,start+1):
+        try:
+            user=await client.fetch_user(int(uid))
+            st=streaks.get(uid,0)
+            embed.add_field(name=f"{i}. {user.display_name}",value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv,st)}",inline=False)
+        except:
+            embed.add_field(name=f"{i}. Unknown",value=f"Score: {sv}",inline=False)
+    await channel.send(embed=embed)
+
+@tasks.loop(time=time(19,15,tzinfo=timezone.utc))
 async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    global current_riddle,current_answer_revealed,correct_users,guess_attempts,deducted_for_user
+    ch=int(os.getenv("DISCORD_CHANNEL_ID","0"))
+    channel=client.get_channel(ch)
+    if not channel: return
+    current_riddle=pick_next_riddle()
+    current_answer_revealed=False
+    correct_users.clear(); guess_attempts.clear(); deducted_for_user.clear()
+    txt=format_question_text(current_riddle)
+    sid=current_riddle.get("submitter_id")
+    stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+    await channel.send(f"{txt}\n\n_(Submitted by: {stext})_")
 
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found for scheduled post.")
-        return
-
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-    deducted_for_user.clear()
-
-    question_text = format_question_text(current_riddle)
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-
-@tasks.loop(time=time(0, 0, tzinfo=timezone.utc))  # Midnight UTC answer reveal
+@tasks.loop(time=time(0,0,tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
-
-    if not current_riddle or current_answer_revealed:
-        return
-
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found for answer reveal.")
-        return
-
-    current_answer_revealed = True
-    correct_answer = current_riddle["answer"]
-    lines = [f"✅ The correct answer was: **{correct_answer}**"]
+    if not current_riddle or current_answer_revealed: return
+    ch=int(os.getenv("DISCORD_CHANNEL_ID","0"))
+    channel=client.get_channel(ch)
+    if not channel: return
+    current_answer_revealed=True
+    ans=current_riddle["answer"]
+    lines=[f"✅ The correct answer was: **{ans}**"]
     if correct_users:
         lines.append("🎉 Congratulations to the following solvers:")
         for uid in correct_users:
             try:
-                user = await client.fetch_user(int(uid))
-                lines.append(f"• {user.display_name}")
-            except:
-                lines.append("• Unknown user")
+                u=await client.fetch_user(int(uid)); lines.append(f"• {u.display_name}")
+            except: lines.append("• Unknown user")
     else:
         lines.append("No one guessed correctly this time.")
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-    lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
-
+    sid=current_riddle.get("submitter_id")
+    stext=f"<@{sid}>" if sid else "Riddle of the Day bot"
+    lines.append(f"\n_(Riddle submitted by: {stext})_")
     await channel.send("\n".join(lines))
 
 # --- Run Bot ---
-
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+DISCORD_BOT_TOKEN=os.getenv("DISCORD_BOT_TOKEN")
 if not DISCORD_BOT_TOKEN:
     print("Please set the DISCORD_BOT_TOKEN environment variable!")
 else:
