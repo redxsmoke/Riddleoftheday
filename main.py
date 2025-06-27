@@ -7,9 +7,6 @@ from datetime import datetime, time, timezone, timedelta
 import random
 from discord import app_commands
 
-# --- Timezone Setup ---
-EST = timezone(timedelta(hours=-5))  # Fixed EST offset UTC-5 (no DST)
-
 # --- Global Variables ---
 intents = discord.Intents.default()
 intents.message_content = True
@@ -32,9 +29,6 @@ guess_attempts = {}  # user_id -> guesses this riddle
 deducted_for_user = set()  # users who lost 1 point this riddle
 
 leaderboard_pages = {}
-
-# --- Your test user ID to block answering own riddles ---
-TEST_USER_ID = "337773020770729985"  # Replace with your user ID or remove for production
 
 # --- Helper functions ---
 
@@ -79,7 +73,7 @@ def pick_next_riddle():
     return riddle
 
 def format_question_text(qdict):
-    base = f"@everyone {qdict['question']} ***(Answer will be revealed in 1 minute)***"
+    base = f"@everyone {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
     remaining = count_unused_questions()
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
@@ -129,37 +123,16 @@ async def on_ready():
         print("Channel not found.")
         return
 
+    # Initialize for first day
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
     correct_users.clear()
     guess_attempts.clear()
     deducted_for_user.clear()
 
-    question_text = format_question_text(current_riddle)
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-    await asyncio.sleep(60)
-
-    current_answer_revealed = True
-
-    correct_answer = current_riddle["answer"]
-    lines = [f"✅ The correct answer was: **{correct_answer}**"]
-    if correct_users:
-        lines.append("🎉 Congratulations to the following solvers:")
-        for uid in correct_users:
-            try:
-                user = await client.fetch_user(int(uid))
-                lines.append(f"• {user.display_name}")
-            except:
-                lines.append("• Unknown user")
-    else:
-        lines.append("No one guessed correctly this time.")
-    lines.append(f"\n_(Riddle submitted by: {submitter_text})_")
-
-    await channel.send("\n".join(lines))
-
+    # Start scheduled tasks
+    daily_purge.start()
+    notify_upcoming_riddle.start()
     post_riddle.start()
     reveal_answer.start()
 
@@ -239,18 +212,10 @@ async def on_message(message):
 
     # Countdown message logic (to next answer reveal)
     now_utc = datetime.now(timezone.utc)
-    now_est = now_utc.astimezone(EST)
-    today_est = now_est.date()
-
-    if today_est == datetime.now(EST).date():
-        reveal_est = datetime.combine(today_est, time(21, 0), tzinfo=EST)
-        reveal_dt = reveal_est.astimezone(timezone.utc)
-        delta = max(reveal_dt - now_utc, timedelta(0))
-    else:
-        reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
-        if now_utc >= reveal_dt:
-            reveal_dt += timedelta(days=1)
-        delta = reveal_dt - now_utc
+    reveal_dt = datetime.combine(now_utc.date(), time(23, 0), tzinfo=timezone.utc)
+    if now_utc >= reveal_dt:
+        reveal_dt += timedelta(days=1)
+    delta = reveal_dt - now_utc
 
     hours, remainder = divmod(int(delta.total_seconds()), 3600)
     minutes = remainder // 60
@@ -418,9 +383,33 @@ async def show_leaderboard(channel, user_id):
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
 
-# --- Scheduled tasks ---
+# --- New scheduled tasks ---
 
-@tasks.loop(time=time(19, 15, tzinfo=timezone.utc))
+@tasks.loop(time=time(6, 55, tzinfo=timezone.utc))
+async def daily_purge():
+    ch_id = int(channel_id or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("Channel not found for daily purge.")
+        return
+    print("Purging messages in channel...")
+    try:
+        async for message in channel.history(limit=100):
+            await message.delete()
+        print("Purge completed.")
+    except Exception as e:
+        print(f"Error during purge: {e}")
+
+@tasks.loop(time=time(6, 57, tzinfo=timezone.utc))
+async def notify_upcoming_riddle():
+    ch_id = int(channel_id or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("Channel not found for notification.")
+        return
+    await channel.send("⏳ The next riddle will be posted soon!")
+
+@tasks.loop(time=time(7, 0, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(channel_id or 0)
@@ -441,7 +430,7 @@ async def post_riddle():
 
     await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
 
-@tasks.loop(time=time(21, 0, tzinfo=EST))
+@tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
     ch_id = int(channel_id or 0)
@@ -475,11 +464,6 @@ async def reveal_answer():
 # --- Main ---
 
 if __name__ == "__main__":
-    # For testing, forcibly set all riddles' submitter_id to TEST_USER_ID
-    for q in submitted_questions:
-        q["submitter_id"] = TEST_USER_ID
-    save_json(QUESTIONS_FILE, submitted_questions)
-
     if token:
         client.run(token)
     else:
