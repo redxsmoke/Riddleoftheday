@@ -175,6 +175,43 @@ async def on_message(message):
     content = message.content.strip()
     user_id = str(message.author.id)
 
+    # Admin/mod commands
+    if content == "!listquestions":
+        if not message.author.guild_permissions.manage_guild:
+            await message.channel.send("⛔ You don't have permission to use this command.")
+            return
+
+        if not submitted_questions:
+            await message.channel.send("📭 No riddles found in the queue.")
+            return
+
+        lines = [f"📋 Total riddles: {len(submitted_questions)}"]
+        for q in submitted_questions:
+            lines.append(f"• ID: `{q['id']}`\n  Q: {q['question']}")
+        # Send in chunks if very long
+        chunks = [lines[i:i+10] for i in range(0, len(lines), 10)]
+        for chunk in chunks:
+            await message.channel.send("\n".join(chunk))
+        return
+
+    if content.startswith("!removequestion "):
+        if not message.author.guild_permissions.manage_guild:
+            await message.channel.send("⛔ You don't have permission to use this command.")
+            return
+        try:
+            _, qid = content.split(" ", 1)
+            before_count = len(submitted_questions)
+            submitted_questions[:] = [q for q in submitted_questions if q.get("id") != qid.strip()]
+            after_count = len(submitted_questions)
+            if before_count != after_count:
+                save_json(QUESTIONS_FILE, submitted_questions)
+                await message.channel.send(f"✅ Riddle with ID `{qid.strip()}` removed.")
+            else:
+                await message.channel.send(f"⚠️ No riddle found with ID `{qid.strip()}`.")
+        except Exception as e:
+            await message.channel.send("⚠️ Error removing question.")
+        return
+
     # Commands: run commands, do NOT delete command messages, do NOT count as guesses
     if content == "!score":
         score = scores.get(user_id, 0)
@@ -300,26 +337,42 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 """
     await interaction.response.send_message(commands, ephemeral=True)
 
-# Modal for /submitriddle slash command to get question & answer from user
-class SubmitRiddleModal(discord.ui.Modal, title="Submit a Riddle"):
-    question = discord.ui.TextInput(label="Question", style=discord.TextStyle.paragraph, required=True, max_length=200)
-    answer = discord.ui.TextInput(label="Answer", style=discord.TextStyle.short, required=True, max_length=100)
+# Slash command /submitriddle now prompts user step-by-step like Dank Memer's /rob
+@tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
+async def submitriddle(interaction: discord.Interaction):
+    await interaction.response.send_message("✍️ What's your riddle question? (Check your DMs!)", ephemeral=True)
 
-    async def on_submit(self, interaction: discord.Interaction):
+    def check(m):
+        return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
+
+    try:
+        dm_channel = await interaction.user.create_dm()
+        await dm_channel.send("✍️ Please enter your riddle question:")
+        question_msg = await client.wait_for('message', timeout=120.0, check=check)
+        question = question_msg.content.strip()
+
+        await dm_channel.send("💡 Now enter the answer to your riddle:")
+        answer_msg = await client.wait_for('message', timeout=120.0, check=check)
+        answer = answer_msg.content.strip()
+
+        if not question or not answer:
+            await dm_channel.send("⚠️ Invalid submission. Both question and answer must be provided.")
+            return
+
         user_id = str(interaction.user.id)
         new_id = str(int(datetime.utcnow().timestamp() * 1000)) + "_" + user_id
         submitted_questions.append({
             "id": new_id,
-            "question": self.question.value.strip(),
-            "answer": self.answer.value.strip(),
+            "question": question,
+            "answer": answer,
             "submitter_id": user_id
         })
         save_json(QUESTIONS_FILE, submitted_questions)
-        await interaction.response.send_message(f"✅ Thanks {interaction.user.mention}, your riddle has been submitted! It will appear in the queue soon.", ephemeral=True)
+        await dm_channel.send("✅ Your riddle has been submitted! Thank you!")
+        await interaction.followup.send("✅ Submission complete!", ephemeral=True)
 
-@tree.command(name="submitriddle", description="Submit a new riddle using a form")
-async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.send_modal(SubmitRiddleModal())
+    except asyncio.TimeoutError:
+        await interaction.followup.send("⏰ You took too long to respond. Please try /submitriddle again.", ephemeral=True)
 
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
@@ -342,74 +395,4 @@ async def post_riddle():
     submitter_id = current_riddle.get("submitter_id")
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
 
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
-
-@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
-async def reveal_answer():
-    global current_answer_revealed
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-    if channel_id == 0:
-        print("DISCORD_CHANNEL_ID not set.")
-        return
-    channel = client.get_channel(channel_id)
-    if not channel or not current_riddle:
-        return
-
-    current_answer_revealed = True
-    correct_answer = current_riddle["answer"]
-    submitter_id = current_riddle.get("submitter_id")
-    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
-
-    if correct_users:
-        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
-        lines.append(f"Submitted by: {submitter_text}\n")
-        lines.append("The following users got it correct:")
-
-        top_scorers = get_top_scorers()
-        for uid in correct_users:
-            uid_str = str(uid)
-            user = await client.fetch_user(uid)
-            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
-            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
-            lines.append(f"\u2022 {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
-        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
-        await channel.send("\n".join(lines))
-    else:
-        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
-
-async def show_leaderboard(channel, user_id):
-    page = leaderboard_pages.get(user_id, 0)
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
-    page = min(page, total_pages - 1)
-
-    embed = discord.Embed(
-        title=f"🏆 Riddle Leaderboard (Page {page + 1}/{total_pages})",
-        description="Top riddle solvers by total correct guesses",
-        color=discord.Color.gold()
-    )
-
-    start = page * 10
-    top_score = sorted_scores[0][1] if sorted_scores else 0
-    top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
-
-    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start + 1):
-        user = await client.fetch_user(int(uid))
-        streak = streaks.get(uid, 0)
-        rank = get_rank(score, streak)
-        extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
-        embed.add_field(
-            name=f"{i}. {user.display_name}",
-            value=f"Correct: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}{extra}",
-            inline=False
-        )
-
-    embed.set_footer(text="Use !leaderboard again to refresh")
-    await channel.send(embed=embed)
-
-if __name__ == "__main__":
-    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-    if not TOKEN:
-        print("Error: DISCORD_BOT_TOKEN environment variable not set.")
-        exit(1)
-    client.run(TOKEN)
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text
