@@ -3,7 +3,7 @@ from discord.ext import tasks
 import asyncio
 import json
 import os
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time, timezone, timedelta, date
 import random
 from discord import app_commands
 
@@ -32,6 +32,8 @@ leaderboard_pages = {}
 
 max_id = 0  # tracks max numeric ID assigned
 
+submission_dates = {}  # user_id -> date of last submission point awarded
+
 
 # --- Helper functions ---
 
@@ -50,9 +52,11 @@ def save_all_scores():
     save_json(STREAKS_FILE, streaks)
 
 def get_rank(score, streak):
-    max_score = max(scores.values()) if scores else 0
-    if score == max_score and score > 0:
-        return "👨‍🍳 Master Sushi Chef"
+    # Determine if user is Master Sushi Chef (top scorer)
+    if scores:
+        max_score = max(scores.values())
+        if score == max_score and max_score > 0:
+            return "👑 Master Sushi Chef (Top scorer)"
     if streak >= 3:
         return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
     if score <= 5:
@@ -174,6 +178,7 @@ async def removequestion(interaction: discord.Interaction):
             await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
     await interaction.response.send_modal(RemoveQuestionModal())
 
+
 # --- Submit riddle modal ---
 class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
     question = discord.ui.TextInput(
@@ -195,6 +200,7 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         global max_id
         q = self.question.value.strip().replace("\n", " ").replace("\r", " ")
         a = self.answer.value.strip()
+
         q_normalized = q.lower().replace(" ", "")
         for existing in submitted_questions:
             existing_q = existing["question"].strip().lower().replace(" ", "")
@@ -212,21 +218,28 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         })
         save_json(QUESTIONS_FILE, submitted_questions)
 
-        # Award point to submitter
-        scores[uid] = scores.get(uid, 0) + 1
-        save_json(SCORES_FILE, scores)
+        # Award point to submitter only once per day
+        today = date.today()
+        last_award_date = submission_dates.get(uid)
+        awarded_point_msg = ""
+        if last_award_date != today:
+            scores[uid] = scores.get(uid, 0) + 1
+            save_json(SCORES_FILE, scores)
+            submission_dates[uid] = today
+            awarded_point_msg = "\n🏅 You’ve also been awarded **1 point** for your submission!"
 
         try:
             dm = await interaction.user.create_dm()
             await dm.send(
                 "✅ Thanks for submitting a riddle! It is now in the queue.\n"
-                "⚠️ You will **not** be able to answer your own riddle when it is posted.\n"
-                "🏅 You’ve also been awarded **1 point** for your submission!"
+                "⚠️ You will **not** be able to answer your own riddle when it is posted."
+                + awarded_point_msg
             )
         except discord.Forbidden:
             pass
 
         await interaction.response.send_message("✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True)
+
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
 async def submitriddle(interaction: discord.Interaction):
@@ -248,14 +261,14 @@ async def addpoints(interaction: discord.Interaction, user: discord.User):
 
 @tree.command(name="removepoint", description="Remove 1 point from a user's score")
 @app_commands.checks.has_permissions(manage_guild=True)
-@app_commands.describe(user="The user to deduct a point from")
+@app_commands.describe(user="The user to remove a point from")
 async def removepoint(interaction: discord.Interaction, user: discord.User):
     uid = str(user.id)
     scores[uid] = max(0, scores.get(uid, 0) - 1)
     streaks[uid] = 0
     save_all_scores()
     await interaction.response.send_message(
-        f"⚠️ Removed 1 point from {user.mention}. New score: {scores[uid]}. Streak has been reset to 0.",
+        f"❌ Removed 1 point and reset streak for {user.mention}. New score: {scores[uid]}, streak reset to 0.",
         ephemeral=True
     )
 
@@ -291,6 +304,7 @@ async def show_leaderboard(channel, user_id):
         except:
             embed.add_field(name=f"{i}. Unknown", value=f"Score: {sv}", inline=False)
     await channel.send(embed=embed)
+
 
 @client.event
 async def on_message(message):
@@ -366,9 +380,10 @@ async def on_message(message):
     countdown_msg = f"⏳ Answer will be revealed in {hours} hour{'s' if hours != 1 else ''} {minutes} minute{'s' if minutes != 1 else ''}."
     await message.channel.send(countdown_msg, delete_after=12)
 
+
 # --- Scheduled tasks ---
 
-@tasks.loop(time=time(18, 55, tzinfo=timezone.utc))  # Changed from 06:55 to 18:55 UTC
+@tasks.loop(time=time(18, 55, tzinfo=timezone.utc))
 async def daily_purge():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
@@ -382,14 +397,14 @@ async def daily_purge():
     except Exception as e:
         print(f"Error during purge: {e}")
 
-@tasks.loop(time=time(18, 57, tzinfo=timezone.utc))  # Changed from 06:57 to 18:57 UTC
+@tasks.loop(time=time(18, 57, tzinfo=timezone.utc))
 async def notify_upcoming_riddle():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if channel:
         await channel.send("⏳ The next riddle will be posted soon!")
 
-@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))  # Changed from 07:00 to 19:00 UTC
+@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
@@ -418,6 +433,7 @@ async def reveal_answer():
     await channel.send(f"🔔 The answer to riddle {current_riddle['id']} is: **{answer}**")
     current_answer_revealed = True
 
+
 # --- /riddleofthedaycommands command ---
 @tree.command(name="riddleofthedaycommands", description="List all available Riddle of the Day commands")
 async def riddleofthedaycommands(interaction: discord.Interaction):
@@ -435,6 +451,7 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 """
     await interaction.response.send_message(commands_list, ephemeral=True)
 
+
 # --- On Ready ---
 @client.event
 async def on_ready():
@@ -445,6 +462,7 @@ async def on_ready():
     notify_upcoming_riddle.start()
     post_riddle.start()
     reveal_answer.start()
+
 
 # --- Run bot ---
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
