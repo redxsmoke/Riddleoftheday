@@ -1,11 +1,11 @@
 import discord
 from discord.ext import tasks
-from discord import app_commands
 import asyncio
 import json
 import os
 from datetime import datetime, time, timezone, timedelta
 import random
+from discord import app_commands
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -36,24 +36,24 @@ used_question_ids = set()
 current_riddle = None
 current_answer_revealed = False
 correct_users = set()
+guess_attempts = {}  # user_id -> guesses used this riddle
+deducted_for_user = set()  # users who lost 1 point this riddle
+
 leaderboard_pages = {}
-guess_attempts = {}
-purged_on_startup = False
 
 def get_rank(score, streak):
-    if score <= 5:
-        rank = "Sushi Newbie 🍽️"
-    elif 6 <= score <= 15:
-        rank = "Maki Novice 🍣"
-    elif 16 <= score <= 25:
-        rank = "Sashimi Skilled 🍤"
-    elif 26 <= score <= 50:
-        rank = "Brainy Botan 🧠"
-    else:
-        rank = "Sushi Einstein 🧪"
     if streak >= 3:
-        rank = f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
-    return rank
+        return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
+    if score <= 5:
+        return "Sushi Newbie 🍽️"
+    elif 6 <= score <= 15:
+        return "Maki Novice 🍣"
+    elif 16 <= score <= 25:
+        return "Sashimi Skilled 🍤"
+    elif 26 <= score <= 50:
+        return "Brainy Botan 🧠"
+    else:
+        return "Sushi Einstein 🧪"
 
 def get_top_scorers():
     if not scores:
@@ -95,12 +95,11 @@ async def purge_channel_messages(channel):
 
 @client.event
 async def on_ready():
-    global purged_on_startup, current_riddle, current_answer_revealed, correct_users, guess_attempts
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
 
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
 
-    # Optionally sync only to a guild for faster command registration during dev
     GUILD_ID = os.getenv("DISCORD_GUILD_ID")
     if GUILD_ID:
         guild_obj = discord.Object(id=int(GUILD_ID))
@@ -115,15 +114,11 @@ async def on_ready():
         print("DISCORD_CHANNEL_ID not set.")
     else:
         channel = client.get_channel(channel_id)
-        if channel and not purged_on_startup:
+        if channel:
+            # Purge once on startup if desired
             await purge_channel_messages(channel)
-            purged_on_startup = True
-            current_riddle = None
-            current_answer_revealed = False
-            correct_users.clear()
-            guess_attempts.clear()
-            await post_special_riddle()
 
+    # Initialize riddle state if none
     if not current_riddle:
         await post_special_riddle()
 
@@ -131,7 +126,7 @@ async def on_ready():
     reveal_answer.start()
 
 async def post_special_riddle():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
@@ -151,8 +146,9 @@ async def post_special_riddle():
     }
 
     current_answer_revealed = False
-    correct_users = set()
+    correct_users.clear()
     guess_attempts.clear()
+    deducted_for_user.clear()
 
     question_text = format_question_text(current_riddle)
     await channel.send(f"{question_text}\n\n_(Submitted by: Riddle of the Day bot)_")
@@ -164,100 +160,67 @@ async def on_message(message):
 
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if message.channel.id != channel_id:
-        # Outside designated channel, allow commands but no guess processing or deletion
-        if message.content.startswith("!"):
-            return
         return
 
-    content = message.content.strip()
+    global correct_users, guess_attempts, deducted_for_user
+
     user_id = str(message.author.id)
+    content = message.content.strip()
 
-    # This block is for legacy text commands that are now slash commands
-    # You can remove this block if you fully moved to slash commands
-    # but keeping it for score and leaderboard commands
-    if content == "!score":
-        score = scores.get(user_id, 0)
-        streak = streaks.get(user_id, 0)
-        rank = get_rank(score, streak)
-        await message.channel.send(
-            f"📊 {message.author.display_name}'s score: **{score}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}"
-        )
+    if not current_riddle or current_answer_revealed:
         return
 
-    if content == "!leaderboard":
-        leaderboard_pages[user_id] = 0
-        await show_leaderboard(message.channel, user_id)
+    # If user already answered correctly this riddle
+    if user_id in correct_users:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"✅ You already answered correctly, {message.author.mention}. No more guesses counted.", delete_after=5)
         return
 
-    # Guessing logic inside the designated channel only
-    if current_riddle and not current_answer_revealed:
-        if user_id in correct_users:
-            if content.startswith("!"):
-                return
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            await message.channel.send(f"✅ You have already guessed the correct answer, {message.author.mention}. No more guesses will be counted.")
-            return
+    attempts = guess_attempts.get(user_id, 0)
+    if attempts >= 5:
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"❌ You are out of guesses for this riddle, {message.author.mention}.", delete_after=5)
+        return
 
-        user_attempts = guess_attempts.get(user_id, 0)
-        if user_attempts >= 5:
-            await message.channel.send(f"❌ You're out of attempts for today's riddle, {message.author.mention}.")
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            return
+    guess_attempts[user_id] = attempts + 1
+    guess = content.lower()
+    correct_answer = current_riddle["answer"].lower()
 
-        guess_attempts[user_id] = user_attempts + 1
-        guess = content.lower()
-        correct_answer = current_riddle["answer"].lower()
+    # Accept minor plural form
+    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
+        correct_users.add(user_id)
+        # Add 1 point only once per user per riddle
+        scores[user_id] = scores.get(user_id, 0) + 1
+        streaks[user_id] = streaks.get(user_id, 0) + 1
+        save_all_scores()
+        try:
+            await message.delete()
+        except:
+            pass
+        await message.channel.send(f"🎉 Correct, {message.author.mention}! Your total score: {scores[user_id]}", delete_after=8)
+        return
+    else:
+        remaining = 5 - guess_attempts[user_id]
+        if remaining == 0 and user_id not in deducted_for_user:
+            scores[user_id] = max(0, scores.get(user_id, 0) - 1)
+            streaks[user_id] = 0
+            deducted_for_user.add(user_id)
+            save_all_scores()
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. You've used all guesses and lost 1 point.", delete_after=8)
+        elif remaining > 0:
+            await message.channel.send(f"❌ Incorrect, {message.author.mention}. {remaining} guess(es) left.", delete_after=6)
+        try:
+            await message.delete()
+        except:
+            pass
+        return
 
-        if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
-            correct_users.add(user_id)
-            # Award point only once per user per riddle
-            if user_id not in scores:
-                scores[user_id] = 0
-            # Prevent awarding point multiple times for same user
-            # so this condition is only for the first correct guess:
-            if guess_attempts[user_id] == 1:
-                scores[user_id] = max(0, scores.get(user_id, 0) + 1)
-                streaks[user_id] = streaks.get(user_id, 0) + 1
-                save_all_scores()
-
-            await message.channel.send(
-                f"🎉 Correct, {message.author.mention}! Keep it up! 🏅 Your current score: {scores.get(user_id,0)}"
-            )
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            return
-        else:
-            remaining = 5 - guess_attempts[user_id]
-            if remaining == 0:
-                scores[user_id] = max(0, scores.get(user_id, 0) - 1)
-                streaks[user_id] = 0
-                save_all_scores()
-                await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention}. You have no guesses left and lost 1 point."
-                )
-            elif remaining == 1:
-                await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guess remaining). If you guess incorrectly again, you will lose 1 point."
-                )
-            else:
-                await message.channel.send(
-                    f"❌ Sorry, that answer is incorrect, {message.author.mention} ({remaining} guesses remaining)."
-                )
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            return
-
-# Slash command: /listquestions (admin/mod only)
 @tree.command(name="listquestions", description="List all submitted riddles")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def listquestions(interaction: discord.Interaction):
@@ -269,69 +232,61 @@ async def listquestions(interaction: discord.Interaction):
     for idx, q in enumerate(submitted_questions, start=1):
         lines.append(f"{idx}. {q['question']}")
 
-    # Discord messages max 2000 chars - send in chunks of 10 lines
-    chunks = [lines[i:i+10] for i in range(0, len(lines), 10)]
-    for chunk in chunks:
+    # Acknowledge interaction first
+    await interaction.response.send_message("Listing riddles...", ephemeral=True)
+
+    # Send in chunks of 10 lines max
+    for i in range(0, len(lines), 10):
+        chunk = lines[i:i + 10]
         await interaction.followup.send("\n".join(chunk), ephemeral=True)
 
-# Modal to prompt question number for removal
-class RemoveQuestionModal(discord.ui.Modal, title="Remove a Submitted Riddle"):
-    question_number = discord.ui.TextInput(label="Riddle number to remove", placeholder="Enter a number")
-
-    def __init__(self, interaction: discord.Interaction):
-        super().__init__()
-        self.interaction = interaction
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            num = int(self.question_number.value.strip())
-            if num < 1 or num > len(submitted_questions):
-                await interaction.response.send_message(
-                    f"⚠️ Invalid question number `{num}`. Please use a number between 1 and {len(submitted_questions)}.",
-                    ephemeral=True,
-                )
-                return
-            removed_question = submitted_questions.pop(num - 1)
-            save_json(QUESTIONS_FILE, submitted_questions)
-            await interaction.response.send_message(
-                f"✅ Removed riddle #{num}: \"{removed_question['question']}\"",
-                ephemeral=True,
-            )
-        except ValueError:
-            await interaction.response.send_message(
-                "⚠️ That doesn't look like a valid number. Please try /removequestion again.",
-                ephemeral=True,
-            )
-        except Exception as e:
-            await interaction.response.send_message(
-                f"⚠️ An error occurred while removing the question: {e}", ephemeral=True
-            )
-
-# Slash command: /removequestion (admin/mod only)
 @tree.command(name="removequestion", description="Remove a submitted riddle by number")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def removequestion(interaction: discord.Interaction):
-    modal = RemoveQuestionModal(interaction)
-    await interaction.response.send_modal(modal)
+    # Prompt user with a modal to input the question number to remove
+    class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
 
-# Slash command: /score to show user's score
+        question_number = discord.ui.TextInput(
+            label="Enter the number of the riddle to remove",
+            placeholder="e.g. 3",
+            required=True,
+            max_length=5
+        )
+
+        async def on_submit(self, modal_interaction: discord.Interaction):
+            try:
+                num = int(self.question_number.value.strip())
+                if num < 1 or num > len(submitted_questions):
+                    await modal_interaction.response.send_message(
+                        f"⚠️ Invalid question number `{num}`. Please provide a number between 1 and {len(submitted_questions)}.",
+                        ephemeral=True
+                    )
+                    return
+                removed = submitted_questions.pop(num - 1)
+                save_json(QUESTIONS_FILE, submitted_questions)
+                await modal_interaction.response.send_message(f"✅ Removed riddle #{num}: \"{removed['question']}\"", ephemeral=True)
+            except ValueError:
+                await modal_interaction.response.send_message("⚠️ Please enter a valid number.", ephemeral=True)
+
+    await interaction.response.send_modal(RemoveQuestionModal())
+
 @tree.command(name="score", description="View your score and rank")
 async def score(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     score_val = scores.get(user_id, 0)
-    streak = streaks.get(user_id, 0)
-    rank = get_rank(score_val, streak)
+    streak_val = streaks.get(user_id, 0)
+    rank = get_rank(score_val, streak_val)
     await interaction.response.send_message(
-        f"📊 {interaction.user.display_name}'s score: **{score_val}**, 🔥 Streak: {streak}\n🏅 Rank: {rank}",
+        f"📊 {interaction.user.display_name}'s score: **{score_val}**, 🔥 Streak: {streak_val}\n🏅 Rank: {rank}",
         ephemeral=True
     )
 
-# Slash command: /leaderboard to show top solvers
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
     leaderboard_pages[user_id] = 0
     await show_leaderboard(interaction.channel, user_id)
+    await interaction.response.send_message("📋 Showing leaderboard...", ephemeral=True)
 
 async def show_leaderboard(channel, user_id):
     page = leaderboard_pages.get(user_id, 0)
@@ -352,33 +307,18 @@ async def show_leaderboard(channel, user_id):
     for i, (uid, score_val) in enumerate(sorted_scores[start:start + 10], start=start + 1):
         try:
             user = await client.fetch_user(int(uid))
-            streak = streaks.get(uid, 0)
-            rank = get_rank(score_val, streak)
+            streak_val = streaks.get(uid, 0)
+            rank = get_rank(score_val, streak_val)
             extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
-            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {score_val} | Streak: {streak}\nRank: {rank}{extra}", inline=False)
+            embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {score_val} | Streak: {streak_val}\nRank: {rank}{extra}", inline=False)
         except Exception:
-            embed.add_field(name=f"{i}. Unknown User", value=f"Score: {score_val}", inline=False)
+            embed.add_field(name=f"{i}. Unknown user", value=f"Score: {score_val}", inline=False)
 
     await channel.send(embed=embed)
 
-# Slash command: /riddleofthedaycommands to show available commands
-@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
-async def riddleofthedaycommands(interaction: discord.Interaction):
-    commands = """
-**Available Riddle Bot Commands:**
-• `/score` – View your score and rank.
-• `/submitriddle` – Submit a new riddle using the modal form.
-• `/leaderboard` – Show the top solvers.
-• `/listquestions` – List all submitted riddles (admin only).
-• `/removequestion` – Remove a riddle by number (admin only).
-• Just type your guess to answer the riddle!
-"""
-    await interaction.response.send_message(commands, ephemeral=True)
-
-# Slash command /submitriddle now prompts user step-by-step like Dank Memer's /rob
 @tree.command(name="submitriddle", description="Submit a new riddle step-by-step")
 async def submitriddle(interaction: discord.Interaction):
-    await interaction.response.send_message("✍️ What's your riddle question? (Check your DMs!)", ephemeral=True)
+    await interaction.response.send_message("✍️ Check your DMs to submit a riddle!", ephemeral=True)
 
     def check(m):
         return m.author.id == interaction.user.id and isinstance(m.channel, discord.DMChannel)
@@ -412,9 +352,22 @@ async def submitriddle(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         await interaction.followup.send("⏰ You took too long to respond. Please try /submitriddle again.", ephemeral=True)
 
+@tree.command(name="riddleofthedaycommands", description="View all available Riddle of the Day commands")
+async def riddleofthedaycommands(interaction: discord.Interaction):
+    commands = """
+**Available Riddle Bot Commands:**
+• `/score` – View your score and rank.
+• `/submitriddle` – Submit a new riddle using the modal form.
+• `/leaderboard` – Show the top solvers.
+• `/listquestions` – List all submitted riddles (admin only).
+• `/removequestion` – Remove a riddle by number (admin only).
+• Just type your guess to answer the riddle!
+"""
+    await interaction.response.send_message(commands, ephemeral=True)
+
 @tasks.loop(time=time(hour=6, minute=0, tzinfo=timezone.utc))
 async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
     if channel_id == 0:
         print("DISCORD_CHANNEL_ID not set.")
@@ -426,8 +379,9 @@ async def post_riddle():
 
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
-    correct_users = set()
+    correct_users.clear()
     guess_attempts.clear()
+    deducted_for_user.clear()
 
     question_text = format_question_text(current_riddle)
     submitter_id = current_riddle.get("submitter_id")
@@ -452,7 +406,7 @@ async def reveal_answer():
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
 
     if correct_users:
-        lines = [f"✅ The correct answer is: **{correct_answer}**"]
+        lines = [f"✅ The correct answer was: **{correct_answer}**"]
         lines.append("🎉 Congratulations to the following solvers:")
         for uid in correct_users:
             try:
