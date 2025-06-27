@@ -395,4 +395,75 @@ async def post_riddle():
     submitter_id = current_riddle.get("submitter_id")
     submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
 
-    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text
+    await channel.send(f"{question_text}\n\n_(Submitted by: {submitter_text})_")
+
+@tasks.loop(time=time(hour=23, minute=0, tzinfo=timezone.utc))
+async def reveal_answer():
+    global current_answer_revealed
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
+    if channel_id == 0:
+        print("DISCORD_CHANNEL_ID not set.")
+        return
+    channel = client.get_channel(channel_id)
+    if not channel or not current_riddle:
+        return
+
+    current_answer_revealed = True
+    correct_answer = current_riddle["answer"]
+    submitter_id = current_riddle.get("submitter_id")
+    submitter_text = f"<@{submitter_id}>" if submitter_id else "Riddle of the Day bot"
+
+    if correct_users:
+        lines = [f"✅ The correct answer was **{correct_answer}**!\n"]
+        lines.append(f"Submitted by: {submitter_text}\n")
+        lines.append("The following users got it correct:")
+
+        top_scorers = get_top_scorers()
+        for uid in correct_users:
+            uid_str = str(uid)
+            user = await client.fetch_user(int(uid_str))
+            rank = get_rank(scores.get(uid_str, 0), streaks.get(uid_str, 0))
+            extra = " 👑 Chopstick Champ (Top Solver)" if uid_str in top_scorers else ""
+            lines.append(f"\u2022 {user.mention} (**{scores.get(uid_str, 0)}**, 🔥 {streaks.get(uid_str, 0)}) 🏅 {rank}{extra}")
+        lines.append("\n📅 Stay tuned for tomorrow’s riddle!")
+        await channel.send("\n".join(lines))
+    else:
+        await channel.send(f"❌ The correct answer was **{correct_answer}**. No one got it right.\n\nSubmitted by: {submitter_text}")
+
+async def show_leaderboard(channel, user_id):
+    page = leaderboard_pages.get(user_id, 0)
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    total_pages = max((len(sorted_scores) - 1) // 10 + 1, 1)
+    page = min(page, total_pages - 1)
+
+    embed = discord.Embed(
+        title=f"🏆 Riddle Leaderboard (Page {page + 1}/{total_pages})",
+        description="Top riddle solvers by total correct guesses",
+        color=discord.Color.gold()
+    )
+
+    start = page * 10
+    top_score = sorted_scores[0][1] if sorted_scores else 0
+    top_scorers = [uid for uid, s in sorted_scores if s == top_score and top_score > 0]
+
+    for i, (uid, score) in enumerate(sorted_scores[start:start + 10], start=start + 1):
+        user = await client.fetch_user(int(uid))
+        streak = streaks.get(uid, 0)
+        rank = get_rank(score, streak)
+        extra = " 👑 Chopstick Champ (Top Solver)" if uid in top_scorers else ""
+        embed.add_field(name=f"{i}. {user.display_name}", value=f"Score: {score} | Streak: {streak}\nRank: {rank}{extra}", inline=False)
+
+    await channel.send(embed=embed)
+
+@client.event
+async def on_error(event_method, *args, **kwargs):
+    import traceback
+    print(f"Error in {event_method}:")
+    traceback.print_exc()
+
+if __name__ == "__main__":
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if not TOKEN:
+        print("Please set the DISCORD_TOKEN environment variable")
+        exit(1)
+    client.run(TOKEN)
