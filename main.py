@@ -521,5 +521,5 @@ async def on_ready():
     reveal_answer.start()
 
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 client.run(TOKEN)
