@@ -504,10 +504,11 @@ from datetime import time, timezone
 
 @tasks.loop(seconds=60)
 async def reveal_answer():
-    global current_answer_revealed
+    global current_answer_revealed   # <- must come first
+
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    
+
     if not channel:
         print("❌ Channel not found in reveal_answer()")
         return
