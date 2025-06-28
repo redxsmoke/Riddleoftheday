@@ -671,13 +671,13 @@ if correct_users:
 
 current_answer_revealed = True
 
-    # Start the reveal task once
-    client.loop.create_task(reveal_startup_riddle())
+# Start the reveal task once
+client.loop.create_task(reveal_startup_riddle())
 
-    # Start the normal scheduled tasks as usual
-    daily_purge.start()
-    notify_upcoming_riddle.start()
-    post_riddle.start()
+# Start the normal scheduled tasks as usual
+daily_purge.start()
+notify_upcoming_riddle.start()
+post_riddle.start()
    
 
 
