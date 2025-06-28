@@ -577,13 +577,18 @@ async def on_ready():
         print("❌ Could not find riddle channel.")
         return
 
-    # —— PURGE CHAT HISTORY ON STARTUP ——
+    # —— PURGE CHAT HISTORY ON STARTUP (WITH RATE LIMIT PROTECTION) ——
     try:
+        print("🧹 Starting channel purge...")
         async for msg in channel.history(limit=100):
-            await msg.delete()
-        print("✅ Channel history purged.")
+            try:
+                await msg.delete()
+                await asyncio.sleep(0.4)  # Sleep to avoid rate limit
+            except discord.errors.HTTPException as e:
+                print(f"⚠️ Could not delete message {msg.id}: {e}")
+        print("✅ Channel history purge completed.")
     except Exception as e:
-        print(f"⚠️ Error purging channel history: {e}")
+        print(f"❌ Failed to purge channel: {e}")
 
     # —— FULLY-INTEGRATED STARTUP RIDDLE (TODAY ONLY) ——
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
