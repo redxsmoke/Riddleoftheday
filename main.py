@@ -533,8 +533,7 @@ async def reveal_answer():
     print(f"✅ Revealing answer for riddle {current_riddle['id']}")
     answer = current_riddle["answer"]
     answer_text = (
-        f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}\n\n"
-        "💡 Use the `/submitriddle` command to submit your own riddle!"
+        f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}\n\n 💡 Use the `/submitriddle` command to submit your own riddle!"
     )
     await channel.send(answer_text)
 
