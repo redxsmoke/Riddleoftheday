@@ -178,22 +178,6 @@ async def removeriddle(interaction: discord.Interaction):
 
 
 # --- Submit riddle modal ---
-class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
-    question = discord.ui.TextInput(
-        label="Riddle Question",
-        style=discord.TextStyle.paragraph,
-        placeholder="Enter your riddle question here",
-        required=True,
-        max_length=1000
-    )
-    answer = discord.ui.TextInput(
-        label="Answer",
-        style=discord.TextStyle.paragraph,
-        placeholder="Enter the answer here",
-        required=True,
-        max_length=500
-    )
-
 import traceback  # at the top of your file
 
 class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
@@ -282,14 +266,13 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             await interaction.response.send_message(
                 "✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True
             )
-
         except Exception as e:
-            import traceback
             print("Error in on_submit:", e)
             traceback.print_exc()
             await interaction.response.send_message(
                 "⚠️ Something went wrong. Try again.", ephemeral=True
             )
+
 
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
