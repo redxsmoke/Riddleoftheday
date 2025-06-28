@@ -498,7 +498,11 @@ async def notify_upcoming_riddle():
 
 @tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
 async def post_riddle():
-    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user, submitted_questions
+
+    # Reload questions fresh from file each time a riddle posts
+    submitted_questions = load_json(QUESTIONS_FILE)
+
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if not channel:
@@ -510,6 +514,8 @@ async def post_riddle():
     correct_users.clear()
     guess_attempts.clear()
     deducted_for_user.clear()
+
+    base_text = format_question_text(current_riddle)
 
     base_text = format_question_text(current_riddle)
 
