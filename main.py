@@ -533,24 +533,24 @@ async def reveal_answer():
     print(f"✅ Revealing answer for riddle {current_riddle['id']}")
     answer = current_riddle["answer"]
     answer_text = (
-    f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}\n\n"
-    "💡 Use the `/submitriddle` command to submit your own riddle!"
-)
-await channel.send(answer_text)
+        f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}\n\n"
+        "💡 Use the `/submitriddle` command to submit your own riddle!"
+    )
+    await channel.send(answer_text)
 
-if correct_users:
-    mentions = []
-    for user_id_str in correct_users:
-        try:
-            user = await client.fetch_user(int(user_id_str))
-            mentions.append(user.mention)
-        except Exception as e:
-            print(f"Could not fetch user {user_id_str}: {e}")
+    if correct_users:
+        mentions = []
+        for user_id_str in correct_users:
+            try:
+                user = await client.fetch_user(int(user_id_str))
+                mentions.append(user.mention)
+            except Exception as e:
+                print(f"Could not fetch user {user_id_str}: {e}")
 
-   if mentions:
-        await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+        if mentions:
+            await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
 
-current_answer_revealed = True
+    current_answer_revealed = True
 
 
 @tasks.loop(seconds=90)
