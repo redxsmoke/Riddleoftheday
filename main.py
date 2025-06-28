@@ -165,15 +165,17 @@ async def removeriddle(interaction: discord.Interaction):
             required=True,
             max_length=10
         )
- async def on_submit(self, modal_interaction: discord.Interaction):
+
+        async def on_submit(self, modal_interaction: discord.Interaction):
             qid = self.question_id.value.strip()
-            idx = next((i for i, q in enumerate(submitted_questions) if q.get("id") == qid), None)
+            idx = next((i for i, q in enumerate(submitted_questions) if str(q.get("id")) == qid), None)
             if idx is None:
                 await modal_interaction.response.send_message(f"⚠️ No riddle found with ID `{qid}`.", ephemeral=True)
                 return
             removed = submitted_questions.pop(idx)
             save_json(QUESTIONS_FILE, submitted_questions)
             await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
+
     await interaction.response.send_modal(RemoveRiddleModal())
 
 
@@ -272,7 +274,6 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             await interaction.response.send_message(
                 "⚠️ Something went wrong. Try again.", ephemeral=True
             )
-
 
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
