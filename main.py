@@ -511,8 +511,22 @@ async def post_riddle():
     guess_attempts.clear()
     deducted_for_user.clear()
 
-    text = format_question_text(current_riddle)
-    await channel.send(text)
+    base_text = format_question_text(current_riddle)
+
+    # Append submitter mention or default text
+    submitter_id = current_riddle.get("submitter_id")
+    if submitter_id is None:
+        submitter_text = "\n_(Riddle submitted by **Riddle of the Day Bot**)_"
+    else:
+        try:
+            user = await client.fetch_user(int(submitter_id))
+            submitter_text = f"\n_(Riddle submitted by {user.mention})_"
+        except Exception as e:
+            print(f"Could not fetch submitter for riddle {current_riddle['id']}: {e}")
+            submitter_text = "\n_(Riddle submitted by **Riddle of the Day Bot**)_"
+
+    final_text = base_text + submitter_text
+    await channel.send(final_text)
 
 from datetime import time, timezone
 
