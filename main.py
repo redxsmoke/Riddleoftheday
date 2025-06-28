@@ -341,11 +341,11 @@ class LeaderboardView(discord.ui.View):
 @tree.command(name="leaderboard", description="Show the top solvers")
 async def leaderboard(interaction: discord.Interaction):
     if not scores:
-        await interaction.response.send_message("📭 No scores available yet.", ephemeral=True)
+        await interaction.response.send_message("📭 No scores available yet.", ephemeral=False)
         return
     view = LeaderboardView(interaction.user.id)
     embed = await view.format_page()
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
 
 
 # --- Rest of your code unchanged ---
