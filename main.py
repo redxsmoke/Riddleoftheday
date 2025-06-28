@@ -627,7 +627,7 @@ async def on_ready():
         f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
     )
 
-    # Define inner function to reveal answer after delay
+    # Schedule the reveal after 60 seconds
     async def reveal_startup_riddle():
         global current_answer_revealed
 
@@ -645,8 +645,22 @@ async def on_ready():
         print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
         await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
 
-        # Congratulate correct users with detailed info
-        await reveal_answer(channel, correct_users, scores, streaks)
+        if correct_users:
+            congrats_lines = []
+        for user_id_str in correct_users:
+        try:
+            user = await client.fetch_user(int(user_id_str))
+            uid = str(user.id)
+            sv = scores.get(uid, 0)
+            st = streaks.get(uid, 0)
+            rank = get_rank(sv, st)
+            congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
+        except Exception as e:
+            print(f"Could not fetch user {user_id_str}: {e}")
+
+        await channel.send("🎉 Congratulations to:\n" + "\n".join(congrats_lines))
+
+        current_answer_revealed = True
 
     # Start the reveal task once
     client.loop.create_task(reveal_startup_riddle())
@@ -655,35 +669,6 @@ async def on_ready():
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
-
-
-# Define this at global scope (outside on_ready)
-async def reveal_answer(channel, correct_users, scores, streaks):
-    if correct_users:
-        congrats_lines = []
-        for user_id_str in correct_users:
-            try:
-                user = await client.fetch_user(int(user_id_str))
-                uid = str(user.id)
-                sv = scores.get(uid, 0)
-                st = streaks.get(uid, 0)
-                rank = get_rank(sv, st)
-                congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
-            except Exception as e:
-                print(f"Could not fetch user {user_id_str}: {e}")
-
-        await channel.send("🎉 Congratulations to:\n" + "\n".join(congrats_lines))
-
-    global current_answer_revealed
-    current_answer_revealed = True
-
-# Start the reveal task once
-client.loop.create_task(reveal_startup_riddle())
-
-# Start the normal scheduled tasks as usual
-daily_purge.start()
-notify_upcoming_riddle.start()
-post_riddle.start()
    
 
 
