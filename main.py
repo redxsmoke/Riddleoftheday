@@ -500,7 +500,7 @@ async def post_riddle():
     text = format_question_text(current_riddle)
     await channel.send(text)
 
-@tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
+@tasks.loop(seconds=60)
 async def reveal_answer():
     global current_answer_revealed
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
