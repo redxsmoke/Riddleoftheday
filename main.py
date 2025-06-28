@@ -3,9 +3,17 @@ from discord.ext import tasks
 import asyncio
 import json
 import os
+import re
+STOP_WORDS = {"a", "an", "the", "is", "was", "were", "of", "to", "and", "in", "on", "at", "by"}
+def clean_and_filter(text):
+    words = re.findall(r'\b\w+\b', text.lower())
+    return [w for w in words if w not in STOP_WORDS]
+    
 from datetime import datetime, time, timezone, timedelta, date
 import random
 from discord import app_commands
+
+
 
 # —– Intents + Client initialization —–
 intents = discord.Intents.default()
@@ -415,7 +423,6 @@ async def on_message(message):
     if not current_riddle or current_answer_revealed:
         return
 
-    # Block submitter from answering their own riddle
     if current_riddle.get("submitter_id") == user_id:
         try: await message.delete()
         except: pass
@@ -436,11 +443,12 @@ async def on_message(message):
         return
 
     guess_attempts[user_id] = attempts + 1
-    guess = content.lower()
-    correct_answer = current_riddle["answer"].lower()
 
-    # Accept basic singular/plural matching
-    if guess == correct_answer or guess.rstrip("s") == correct_answer.rstrip("s"):
+    # *** This part must be indented inside on_message ***
+    user_words = clean_and_filter(content)
+    answer_words = clean_and_filter(current_riddle["answer"])
+
+    if any(word in user_words for word in answer_words):
         correct_users.add(user_id)
         scores[user_id] = scores.get(user_id, 0) + 1
         streaks[user_id] = streaks.get(user_id, 0) + 1
