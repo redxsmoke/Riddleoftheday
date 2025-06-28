@@ -222,25 +222,31 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         if channel:
             await channel.send("🧠 @𝐈𝐳𝐳𝐲𝐁𝐚𝐧 has submitted a new Riddle of the Day. Use /listriddles to view the question and /removeriddle if moderation is needed.")
 
-        # Award point to submitter only once per day
-        today = date.today()
-        last_award_date = submission_dates.get(uid)
-        awarded_point_msg = ""
-        if last_award_date != today:
-            scores[uid] = scores.get(uid, 0) + 1
-            save_json(SCORES_FILE, scores)
-            submission_dates[uid] = today
-            awarded_point_msg = "\n🏅 You’ve also been awarded **1 point** for your submission!"
+       # Award point to submitter only once per day
+today = date.today()
+last_award_date = submission_dates.get(uid)
+already_awarded = last_award_date == today
 
-        try:
-            dm = await interaction.user.create_dm()
-            await dm.send(
-                "✅ Thanks for submitting a riddle! It is now in the queue.\n"
-                "⚠️ You will **not** be able to answer your own riddle when it is posted."
-                + awarded_point_msg
-            )
-        except discord.Forbidden:
-            pass
+if not already_awarded:
+    scores[uid] = scores.get(uid, 0) + 1
+    save_json(SCORES_FILE, scores)
+    submission_dates[uid] = today
+
+try:
+    dm = await interaction.user.create_dm()
+    if not already_awarded:
+        await dm.send(
+            "✅ Thanks for submitting a riddle! It is now in the queue.\n"
+            "⚠️ You will **not** be able to answer your own riddle when it is posted.\n"
+            "🏅 You’ve also been awarded **1 point** for your submission and you will not lose your streak when your question is posted!"
+        )
+    else:
+        await dm.send(
+            "✅ Thanks for submitting another riddle! It has been added to the queue.\n"
+            "⚠️ You’ve already earned a point for today’s riddle submission. You can earn another by submitting a new riddle tomorrow!"
+        )
+except discord.Forbidden:
+    pass
 
         await interaction.response.send_message("✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True)
 
