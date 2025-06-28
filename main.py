@@ -485,7 +485,7 @@ async def on_ready():
 
 # --- Main ---
 if __name__ == "__main__":
-    token = os.getenv("DISCORD_TOKEN")
+    token = os.getenv("DISCORD_BOT_TOKEN")
     if not token:
         print("ERROR: DISCORD_TOKEN environment variable not set.")
         exit(1)
