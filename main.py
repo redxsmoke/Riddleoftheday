@@ -485,15 +485,19 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
     commands_list = """
 **Available Riddle of the Day Commands:**
 
+• `/riddleofthedaycommands` - Show this list of commands.
 • `/submitriddle` - Submit a new riddle via a form.
-• `/listriddles` - (Admin) List all submitted riddles.
-• `/removeriddle` - (Admin) Remove a riddle by ID.
 • `/score` - View your current score and rank.
 • `/leaderboard` - Show the top solvers.
-• `/addpoints` - (Admin) Add a point to a user.
-• `/removepoint` - (Admin) Remove a point from a user.
 • `/ranks` - Show the rank descriptions.
-• `/riddleofthedaycommands` - Show this list of commands.
+
+ADMIN ONLY COMMANDS
+• `/listriddles` - List all submitted riddles.
+• `/removeriddle` - Remove a riddle by ID.
+• `/addpoints` - Add a point to a user.
+• `/removepoint` - Remove a point from a user.
+
+
 """
     await interaction.response.send_message(commands_list, ephemeral=True)
 
