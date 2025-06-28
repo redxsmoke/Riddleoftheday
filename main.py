@@ -496,7 +496,7 @@ async def notify_upcoming_riddle():
     if channel:
         await channel.send("⏳ The next riddle will be posted soon! Submit your own riddle by using the /submitriddle commanda")
 
-@tasks.loop(time=time(19, 00, tzinfo=timezone.utc))
+(time=time(19, 00, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
@@ -532,7 +532,7 @@ from datetime import time, timezone
 
 @tasks.loop(time=time(19, 00, tzinfo=timezone.utc))
 async def reveal_answer():
-    global current_answer_revealed   # <- must come first
+    global current_answer_revealed
 
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
@@ -545,23 +545,25 @@ async def reveal_answer():
         return
 
     print(f"✅ Revealing answer for riddle {current_riddle['id']}")
-    answer = current_riddle["answer"]
     answer_text = (
         f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}\n\n 💡 Use the `/submitriddle` command to submit your own riddle!"
     )
     await channel.send(answer_text)
 
     if correct_users:
-        mentions = []
+        congrats_lines = []
         for user_id_str in correct_users:
             try:
                 user = await client.fetch_user(int(user_id_str))
-                mentions.append(user.mention)
+                uid = str(user.id)
+                sv = scores.get(uid, 0)
+                st = streaks.get(uid, 0)
+                rank = get_rank(sv, st)
+                congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
             except Exception as e:
                 print(f"Could not fetch user {user_id_str}: {e}")
 
-        if mentions:
-            await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+        await channel.send("🎉 Congratulations to:\n" + "\n".join(congrats_lines))
 
     current_answer_revealed = True
 
@@ -647,59 +649,14 @@ async def on_ready():
         return
 
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-    deducted_for_user.clear()
-
-    # Post the startup riddle immediately
-    await channel.send(
-        f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
-    )
-
-    # Schedule the reveal after 60 seconds
-    async def reveal_startup_riddle():
-        global current_answer_revealed
-
-        print("⏳ Waiting 60 seconds before revealing the startup riddle answer...")
-        await asyncio.sleep(60)
-
-        if current_answer_revealed:
-            print("⚠️ Answer already revealed. Skipping startup reveal.")
-            return
-
-        if not current_riddle:
-            print("❌ No current riddle set for startup reveal.")
-            return
-
-        print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
-        await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
-
-        if correct_users:
-            congrats_lines = []
-            for user_id_str in correct_users:
-                try:
-                    user = await client.fetch_user(int(user_id_str))
-                    uid = str(user.id)
-                    sv = scores.get(uid, 0)
-                    st = streaks.get(uid, 0)
-                    rank = get_rank(sv, st)
-                    congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
-                except Exception as e:
-                    print(f"Could not fetch user {user_id_str}: {e}")
-
-        await channel.send("🎉 Congratulations to:\n" + "\n".join(congrats_lines))
-
-        current_answer_revealed = True
-
-    # Start the reveal task once
-    client.loop.create_task(reveal_startup_riddle())
-
+    
     # Start the normal scheduled tasks as usual
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
+    reveal_answer.start()
+    post_no_one_guessed_message.start()
+    
    
 
 
