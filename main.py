@@ -500,6 +500,8 @@ async def post_riddle():
     text = format_question_text(current_riddle)
     await channel.send(text)
 
+from datetime import time, timezone
+
 @tasks.loop(seconds=60)
 async def reveal_answer():
     global current_answer_revealed
@@ -517,13 +519,34 @@ async def reveal_answer():
     answer = current_riddle["answer"]
     await channel.send(f"🔔 The answer to riddle {current_riddle['id']} is: **{answer}**")
 
-    if not correct_users:
-        print("ℹ️ No correct users — posting 'no one got it' message.")
-        await channel.send("😢 No one guessed the riddle correctly today.")
-    else:
-        print(f"🎯 {len(correct_users)} user(s) got it right.")
+    if correct_users:
+        mentions = []
+        for user_id_str in correct_users:
+            try:
+                user = await client.fetch_user(int(user_id_str))
+                mentions.append(user.mention)
+            except Exception as e:
+                print(f"Could not fetch user {user_id_str}: {e}")
+
+        if mentions:
+            await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
 
     current_answer_revealed = True
+
+
+@tasks.loop(seconds=90)
+async def post_no_one_guessed_message():
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("❌ Channel not found in post_no_one_guessed_message()")
+        return
+
+    if not correct_users:
+        print("ℹ️ No correct users — posting 'no one guessed it' message after answer reveal.")
+        await channel.send("😢 No one guessed the riddle correctly today.")
+    else:
+        print(f"🎯 {len(correct_users)} user(s) got it right — no 'no one guessed' message needed.")
 
 
 # --- /riddleofthedaycommands command ---
