@@ -570,11 +570,47 @@ For scores above 50 points.
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     await tree.sync()
-    # Start scheduled tasks
-    daily_purge.start()
-    notify_upcoming_riddle.start()
-    post_riddle.start()
-    reveal_answer.start()
+
+    # —— BEGIN INTEGRATED TEST RIDDLE ——
+    TEST_CHANNEL_ID = 123456789012345678  # ← your test channel ID
+    channel = client.get_channel(TEST_CHANNEL_ID)
+    if channel:
+        # Set up the test riddle in your existing workflow
+        global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+        test_riddle = {
+            "id": "T1",
+            "question": "What has keys but can't open locks?",
+            "answer": "a piano"
+        }
+        current_riddle = test_riddle
+        current_answer_revealed = False
+        correct_users.clear()
+        guess_attempts.clear()
+        deducted_for_user.clear()
+
+        # Post it just like your scheduled post_riddle does
+        await channel.send(
+            f"@everyone **{test_riddle['id']}.** {test_riddle['question']}  "
+            "*(You have up to 5 guesses – just type in this channel.)*"
+        )
+
+        # After 60s, reveal answer using your reveal_answer logic path
+        async def finish_test():
+            await asyncio.sleep(60)
+            # Reveal the answer
+            await channel.send(f"🔔 **Answer to {test_riddle['id']}:** **{test_riddle['answer']}**")
+            # Mark it revealed so on_message stops accepting guesses
+            current_answer_revealed = True
+
+            # Summarize who got it right
+            if correct_users:
+                mentions = " ".join(f"<@{uid}>" for uid in correct_users)
+                await channel.send(f"🎉 **Correct answers by:** {mentions}")
+            else:
+                await channel.send("😢 No one answered correctly this time.")
+        client.loop.create_task(finish_test())
+    # —— END INTEGRATED TEST RIDDLE ——
+
 
 
 # --- Run bot ---
