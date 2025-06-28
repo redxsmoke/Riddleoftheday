@@ -494,9 +494,9 @@ async def notify_upcoming_riddle():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
     if channel:
-        await channel.send("⏳ The next riddle will be posted soon!")
+        await channel.send("⏳ The next riddle will be posted soon! Submit your own riddle by using the /submitriddle commanda")
 
-@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
+@tasks.loop(seconds=30)
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
