@@ -571,32 +571,44 @@ async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     await tree.sync()
 
-    # —— BEGIN TEST RIDDLE BLOCK ——
-    TEST_CHANNEL_ID = 123456789012345678  # ← replace with your test channel ID
-    channel = client.get_channel(TEST_CHANNEL_ID)
-    if channel:
-        test_riddle = {
-            "id": "TEST1",
-            "question": "What has keys but can't open locks?",
-            "answer": "A piano"
-        }
+    ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(ch_id)
+    if not channel:
+        print("❌ Could not find riddle channel.")
+        return
 
-        # Post the test riddle immediately
-        await channel.send(
-            f"🧩 **Test Riddle {test_riddle['id']}:** {test_riddle['question']}"
-        )
+    # —— PURGE CHAT HISTORY ON STARTUP ——
+    try:
+        async for msg in channel.history(limit=100):
+            await msg.delete()
+        print("✅ Channel history purged.")
+    except Exception as e:
+        print(f"⚠️ Error purging channel history: {e}")
 
-        # Schedule the answer reveal in 60 seconds
-        async def reveal_test_answer():
-            await asyncio.sleep(60)
+    # —— FULLY-INTEGRATED STARTUP RIDDLE (TODAY ONLY) ——
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+    current_riddle = pick_next_riddle()
+    current_answer_revealed = False
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+
+    await channel.send(
+        f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
+    )
+
+    async def reveal_startup_riddle():
+        await asyncio.sleep(60)
+        if current_riddle:
             await channel.send(
-                f"🔔 **Answer to {test_riddle['id']}:** {test_riddle['answer']}"
+                f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}"
             )
+            global current_answer_revealed
+            current_answer_revealed = True
 
-        client.loop.create_task(reveal_test_answer())
-    # —— END TEST RIDDLE BLOCK ——
+    client.loop.create_task(reveal_startup_riddle())
 
-    # Start scheduled tasks
+    # —— START DAILY SCHEDULED TASKS ——
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
