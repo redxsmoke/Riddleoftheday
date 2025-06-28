@@ -9,8 +9,8 @@ from discord import app_commands
 
 # --- Global Variables ---
 intents = discord.Intents.default()
-intents.message_content = True
-client = discord.Client(intents=intents)
+intents.members = True            # ← enables guild.members population
+intents.message_content = True    # ← if you need to read message content
 tree = app_commands.CommandTree(client)
 
 QUESTIONS_FILE = "submitted_questions.json"
