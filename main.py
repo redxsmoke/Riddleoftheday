@@ -530,7 +530,7 @@ async def post_riddle():
 
 from datetime import time, timezone
 
-@tasks.loop(time=time(19, 00, tzinfo=timezone.utc))
+@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
 
