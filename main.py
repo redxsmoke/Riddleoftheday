@@ -222,7 +222,10 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             for existing in submitted_questions:
                 existing_q = existing["question"].strip().lower().replace(" ", "")
                 if existing_q == q_normalized:
-                    await interaction.response.send_message("⚠️ This riddle has already been submitted. Please try a different one.", ephemeral=True)
+                    await interaction.response.send_message(
+                        "⚠️ This riddle has already been submitted. Please try a different one.", 
+                        ephemeral=True
+                    )
                     return
 
             new_id = get_next_id()
@@ -261,7 +264,10 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
                 scores[uid] = scores.get(uid, 0) + 1
                 save_json(SCORES_FILE, scores)
                 submission_dates[uid] = today
-                awarded_point_msg = "\n🏅 You’ve been awarded 1 point for your submission, and you will _not_ lose your streak when your riddle is posted! You're welcome to submit more riddles today, but keep in mind: you can only earn 1 submission point per day. Submit another tomorrow to earn an additional point!"
+                awarded_point_msg = (
+                    "\n🏅 You’ve been awarded 1 point for your submission, and you will _not_ lose your streak when your riddle is posted! "
+                    "You're welcome to submit more riddles today, but keep in mind: you can only earn 1 submission point per day. Submit another tomorrow to earn an additional point!"
+                )
 
             try:
                 dm = await interaction.user.create_dm()
@@ -273,12 +279,17 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             except discord.Forbidden:
                 pass
 
-            await interaction.response.send_message("✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True)
+            await interaction.response.send_message(
+                "✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True
+            )
 
         except Exception as e:
+            import traceback
             print("Error in on_submit:", e)
             traceback.print_exc()
-            await interaction.response.send_message("⚠️ Something went wrong. Try again.", ephemeral=True)
+            await interaction.response.send_message(
+                "⚠️ Something went wrong. Try again.", ephemeral=True
+            )
 
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
