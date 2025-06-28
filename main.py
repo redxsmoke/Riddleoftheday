@@ -165,7 +165,7 @@ async def removeriddle(interaction: discord.Interaction):
             required=True,
             max_length=10
         )
-        async def on_submit(self, modal_interaction: discord.Interaction):
+ async def on_submit(self, modal_interaction: discord.Interaction):
             qid = self.question_id.value.strip()
             idx = next((i for i, q in enumerate(submitted_questions) if q.get("id") == qid), None)
             if idx is None:
@@ -194,67 +194,91 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         max_length=500
     )
 
-async def on_submit(self, interaction: discord.Interaction):
-    global max_id
-    q = self.question.value.strip().replace("\n", " ").replace("\r", " ")
-    a = self.answer.value.strip()
+import traceback  # at the top of your file
 
-    q_normalized = q.lower().replace(" ", "")
-    for existing in submitted_questions:
-        existing_q = existing["question"].strip().lower().replace(" ", "")
-        if existing_q == q_normalized:
-            await interaction.response.send_message("⚠️ This riddle has already been submitted. Please try a different one.", ephemeral=True)
-            return
+class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
+    question = discord.ui.TextInput(
+        label="Riddle Question",
+        style=discord.TextStyle.paragraph,
+        placeholder="Enter your riddle question here",
+        required=True,
+        max_length=1000
+    )
+    answer = discord.ui.TextInput(
+        label="Answer",
+        style=discord.TextStyle.paragraph,
+        placeholder="Enter the answer here",
+        required=True,
+        max_length=500
+    )
 
-    new_id = get_next_id()
-    uid = str(interaction.user.id)
-    submitted_questions.append({
-        "id": new_id,
-        "question": q,
-        "answer": a,
-        "submitter_id": uid
-    })
-    save_json(QUESTIONS_FILE, submitted_questions)
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            global max_id
+            q = self.question.value.strip().replace("\n", " ").replace("\r", " ")
+            a = self.answer.value.strip()
 
-    # Notify admins and moderators with Manage Messages permission
-    guild = interaction.guild
-    if guild:
-        submitter_name = interaction.user.display_name
-        for member in guild.members:
-            if member.bot:
-                continue
-            perms = member.guild_permissions
-            if perms.manage_messages:
-                try:
-                    dm = await member.create_dm()
-                    await dm.send(
-                        f"🧠 @{submitter_name} has submitted a new Riddle of the Day. "
-                        "Use `/listriddles` to view the question and `/removeriddle` if moderation is needed."
-                    )
-                except discord.Forbidden:
-                    pass  # Can't send DM to this member
+            q_normalized = q.lower().replace(" ", "")
+            for existing in submitted_questions:
+                existing_q = existing["question"].strip().lower().replace(" ", "")
+                if existing_q == q_normalized:
+                    await interaction.response.send_message("⚠️ This riddle has already been submitted. Please try a different one.", ephemeral=True)
+                    return
 
-    # Award point to submitter only once per day
-    today = date.today()
-    last_award_date = submission_dates.get(uid)
-    awarded_point_msg = ""
-    if last_award_date != today:
-        scores[uid] = scores.get(uid, 0) + 1
-        save_json(SCORES_FILE, scores)
-        submission_dates[uid] = today
-        awarded_point_msg = "\n🏅 You’ve been awarded 1 point for your submission, and you will _not_ lose your streak when your riddle is posted! You're welcome to submit more riddles today, but keep in mind: you can only earn 1 submission point per day. Submit another tomorrow to earn an additional point!"
+            new_id = get_next_id()
+            uid = str(interaction.user.id)
+            submitted_questions.append({
+                "id": new_id,
+                "question": q,
+                "answer": a,
+                "submitter_id": uid
+            })
+            save_json(QUESTIONS_FILE, submitted_questions)
 
-    try:
-        dm = await interaction.user.create_dm()
-        await dm.send(
-            "✅ Thanks for submitting a riddle! It is now in the queue.\n"
-            "⚠️ You will **not** be able to answer your own riddle when it is posted."
-            + awarded_point_msg
-        )
-    except discord.Forbidden:
-        pass
+            # Notify admins and moderators with Manage Messages permission
+            guild = interaction.guild
+            if guild:
+                submitter_name = interaction.user.display_name
+                for member in guild.members:
+                    if member.bot:
+                        continue
+                    perms = member.guild_permissions
+                    if perms.manage_messages:
+                        try:
+                            dm = await member.create_dm()
+                            await dm.send(
+                                f"🧠 @{submitter_name} has submitted a new Riddle of the Day. "
+                                "Use `/listriddles` to view the question and `/removeriddle` if moderation is needed."
+                            )
+                        except discord.Forbidden:
+                            pass  # Can't DM this member
 
-    await interaction.response.send_message("✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True)
+            # Award point to submitter only once per day
+            today = date.today()
+            last_award_date = submission_dates.get(uid)
+            awarded_point_msg = ""
+            if last_award_date != today:
+                scores[uid] = scores.get(uid, 0) + 1
+                save_json(SCORES_FILE, scores)
+                submission_dates[uid] = today
+                awarded_point_msg = "\n🏅 You’ve been awarded 1 point for your submission, and you will _not_ lose your streak when your riddle is posted! You're welcome to submit more riddles today, but keep in mind: you can only earn 1 submission point per day. Submit another tomorrow to earn an additional point!"
+
+            try:
+                dm = await interaction.user.create_dm()
+                await dm.send(
+                    "✅ Thanks for submitting a riddle! It is now in the queue.\n"
+                    "⚠️ You will **not** be able to answer your own riddle when it is posted."
+                    + awarded_point_msg
+                )
+            except discord.Forbidden:
+                pass
+
+            await interaction.response.send_message("✅ Your riddle has been submitted and added to the queue! Check your DMs.", ephemeral=True)
+
+        except Exception as e:
+            print("Error in on_submit:", e)
+            traceback.print_exc()
+            await interaction.response.send_message("⚠️ Something went wrong. Try again.", ephemeral=True)
 
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
