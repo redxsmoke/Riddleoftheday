@@ -82,26 +82,25 @@ def pick_next_riddle():
     used_question_ids.add(riddle["id"])
     return riddle
 
-async def format_question_text(riddle):
-    base = f"@everyone {riddle['id']}. {riddle['question']} ***(Answer will be revealed at 23:00 UTC)***"
+def format_question_text(qdict):
+    base = f"@everyone {qdict['id']}. {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
     
-    submitter_id = riddle.get("submitter_id")
-    if not submitter_id:
-        submitter_text = "\n_(Riddle submitted by **Riddle of the Day Bot**)_"
-    else:
+    # Add submitter mention if available
+    if "submitter_id" in qdict:
         try:
-            user = await client.fetch_user(int(submitter_id))
-            submitter_text = f"\n_(Riddle submitted by {user.mention})_"
+            submitter = client.get_user(int(qdict["submitter_id"]))
+            if submitter:
+                base += f"\n_(Riddle submitted by {submitter.mention})_"
         except Exception as e:
-            print(f"Could not fetch submitter for riddle {riddle['id']}: {e}")
-            submitter_text = "\n_(Riddle submitted by **Riddle of the Day Bot**)_"
-    base += submitter_text
+            print(f"Could not fetch submitter for riddle {qdict['id']}: {e}")
 
     remaining = count_unused_questions()
     if remaining < 5:
         base += "\n\n⚠️ Less than 5 new riddles remain - submit a new riddle with /submitriddle to add it to the queue!"
 
+    # Always append this line
     base += "\n\n💡 Use the `/submitriddle` command to submit your own riddle!"
+    
     return base
 
 def get_next_id():
