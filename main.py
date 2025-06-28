@@ -505,14 +505,23 @@ async def reveal_answer():
     global current_answer_revealed
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
-    if not channel or current_riddle is None:
+    
+    if not channel:
+        print("❌ Channel not found in reveal_answer()")
+        return
+    if current_riddle is None:
+        print("❌ No current_riddle in reveal_answer()")
         return
 
+    print(f"✅ Revealing answer for riddle {current_riddle['id']}")
     answer = current_riddle["answer"]
     await channel.send(f"🔔 The answer to riddle {current_riddle['id']} is: **{answer}**")
 
     if not correct_users:
+        print("ℹ️ No correct users — posting 'no one got it' message.")
         await channel.send("😢 No one guessed the riddle correctly today.")
+    else:
+        print(f"🎯 {len(correct_users)} user(s) got it right.")
 
     current_answer_revealed = True
 
