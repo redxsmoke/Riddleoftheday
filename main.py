@@ -230,7 +230,7 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             scores[uid] = scores.get(uid, 0) + 1
             save_json(SCORES_FILE, scores)
             submission_dates[uid] = today
-            awarded_point_msg = "\n🏅 You’ve also been awarded **1 point** for your submission!"
+            awarded_point_msg = "\n"🏅 You’ve been awarded 1 point for your submission, and you will _not_ lose your streak when your riddle is posted! You're welcome to submit more riddles today, but keep in mind: you can only earn 1 submission point per day. Submit another tomorrow to earn an additional point!"
 
         try:
             dm = await interaction.user.create_dm()
