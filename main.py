@@ -216,11 +216,23 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         })
         save_json(QUESTIONS_FILE, submitted_questions)
 
-        # Notify admins and moderators
-        ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
-        channel = client.get_channel(ch_id)
-        if channel:
-            await channel.send("🧠 @𝐈𝐳𝐳𝐲𝐁𝐚𝐧 has submitted a new Riddle of the Day. Use /listriddles to view the question and /removeriddle if moderation is needed.")
+# Notify admins and moderators with Manage Messages permission
+guild = interaction.guild
+if guild:
+    submitter_name = interaction.user.display_name
+    for member in guild.members:
+        if member.bot:
+            continue
+        perms = member.guild_permissions
+        if perms.manage_messages:
+            try:
+                dm = await member.create_dm()
+                await dm.send(
+                    f"🧠 @{submitter_name} has submitted a new Riddle of the Day. "
+                    f"Use `/listriddles` to view the question and `/removeriddle` if moderation is needed."
+                )
+            except discord.Forbidden:
+                pass  # Can't send DM to this member
 
         # Award point to submitter only once per day
         today = date.today()
