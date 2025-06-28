@@ -103,7 +103,7 @@ existing_ids = [int(q["id"]) for q in submitted_questions if q.get("id") and str
 max_id = max(existing_ids) if existing_ids else 0
 
 
-# --- /listriddlecommand ---
+# --- /listquestions command ---
 class QuestionListView(discord.ui.View):
     def __init__(self, user_id, questions, per_page=10):
         super().__init__(timeout=300)
@@ -145,9 +145,9 @@ class QuestionListView(discord.ui.View):
         else:
             await interaction.response.send_message("⛔ Already at the last page.", ephemeral=True)
 
-@tree.command(name="listriddles", description="List all submitted riddles")
+@tree.command(name="listquestions", description="List all submitted riddles")
 @app_commands.checks.has_permissions(manage_guild=True)
-async def listriddles(interaction: discord.Interaction):
+async def listquestions(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     if not submitted_questions:
         await interaction.followup.send("📭 No riddles found in the queue.", ephemeral=True)
@@ -155,10 +155,10 @@ async def listriddles(interaction: discord.Interaction):
     view = QuestionListView(interaction.user.id, submitted_questions)
     await interaction.followup.send(content=view.get_page_content(), view=view, ephemeral=True)
 
-@tree.command(name="removeriddle", description="Remove a submitted riddle by ID")
+@tree.command(name="removequestion", description="Remove a submitted riddle by ID")
 @app_commands.checks.has_permissions(manage_guild=True)
-async def removeriddle(interaction: discord.Interaction):
-    class RemoveRiddleModal(discord.ui.Modal, title="Remove a Riddle"):
+async def removequestion(interaction: discord.Interaction):
+    class RemoveQuestionModal(discord.ui.Modal, title="Remove a Riddle"):
         question_id = discord.ui.TextInput(
             label="Enter the ID of the riddle to remove",
             placeholder="e.g. 3",
@@ -174,7 +174,7 @@ async def removeriddle(interaction: discord.Interaction):
             removed = submitted_questions.pop(idx)
             save_json(QUESTIONS_FILE, submitted_questions)
             await modal_interaction.response.send_message(f"✅ Removed riddle ID {qid}: \"{removed['question']}\"", ephemeral=True)
-    await interaction.response.send_modal(RemoveRiddleModal())
+    await interaction.response.send_modal(RemoveQuestionModal())
 
 
 # --- Submit riddle modal ---
@@ -220,7 +220,7 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
         channel = client.get_channel(ch_id)
         if channel:
-            await channel.send("🧠 @𝐈𝐳𝐳𝐲𝐁𝐚𝐧 has submitted a new Riddle of the Day. Use /listriddles to view the question and /removeriddle if moderation is needed.")
+            await channel.send("🧠 @𝐈𝐳𝐳𝐲𝐁𝐚𝐧 has submitted a new Riddle of the Day. Use /listquestions to view the question and /removequestion if moderation is needed.")
 
         # Award point to submitter only once per day
         today = date.today()
@@ -486,8 +486,8 @@ async def riddleofthedaycommands(interaction: discord.Interaction):
 **Available Riddle of the Day Commands:**
 
 • `/submitriddle` - Submit a new riddle via a form.
-• `/listriddles` - (Admin) List all submitted riddles.
-• `/removeriddle` - (Admin) Remove a riddle by ID.
+• `/listquestions` - (Admin) List all submitted riddles.
+• `/removequestion` - (Admin) Remove a riddle by ID.
 • `/score` - View your current score and rank.
 • `/leaderboard` - Show the top solvers.
 • `/addpoints` - (Admin) Add a point to a user.
