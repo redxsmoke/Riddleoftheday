@@ -496,7 +496,7 @@ async def notify_upcoming_riddle():
     if channel:
         await channel.send("⏳ The next riddle will be posted soon! Submit your own riddle by using the /submitriddle commanda")
 
-@tasks.loop(seconds=30)
+@tasks.loop(time=time(19, 00, tzinfo=timezone.utc))
 async def post_riddle():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
@@ -530,7 +530,7 @@ async def post_riddle():
 
 from datetime import time, timezone
 
-@tasks.loop(seconds=60)
+@tasks.loop(time=time(19, 00, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed   # <- must come first
 
@@ -566,7 +566,7 @@ async def reveal_answer():
     current_answer_revealed = True
 
 
-@tasks.loop(seconds=90)
+@tasks.loop(time=time(19, 01, tzinfo=timezone.utc))
 async def post_no_one_guessed_message():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
