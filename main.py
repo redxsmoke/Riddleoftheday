@@ -572,7 +572,7 @@ async def on_ready():
     await tree.sync()
 
     # —— BEGIN TEST RIDDLE BLOCK ——
-    TEST_CHANNEL_ID = 123456789012345678  # ← replace with your test channel ID
+    TEST_CHANNEL_ID = 1387520693859782867  # ← replace with your test channel ID
     channel = client.get_channel(TEST_CHANNEL_ID)
     if channel:
         test_riddle = {
