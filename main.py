@@ -216,14 +216,15 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
         })
         save_json(QUESTIONS_FILE, submitted_questions)
 
-        # Notify admins/moderators via DM (no channel message)
-        # Find all guild members with manage_guild permission and DM them
+        # Notify users with Manage Messages permission via DM (no channel message)
         for guild in client.guilds:
             for member in guild.members:
-                if member.guild_permissions.manage_guild and not member.bot:
+                if member.guild_permissions.manage_messages and not member.bot:
                     try:
                         dm = await member.create_dm()
-                        await dm.send(f"🧠 @{interaction.user.display_name} has submitted a new Riddle of the Day. Use /listriddles to view the question and /removeriddle if moderation is needed.")
+                        await dm.send(
+                            f"🧠 @{interaction.user.display_name} has submitted a new Riddle of the Day. Use /listriddles to view the question and /removeriddle if moderation is needed."
+                        )
                     except Exception:
                         pass  # Ignore DM failures
 
@@ -438,88 +439,54 @@ async def on_message(message):
         except:
             pass
 
+    # Show countdown to answer reveal time
+    now = datetime.now(timezone.utc)
+    reveal_time = datetime.combine(now.date(), time(23, 0), tzinfo=timezone.utc)
+    if now > reveal_time:
+        reveal_time += timedelta(days=1)
+    remaining = reveal_time - now
+    mins, secs = divmod(int(remaining.total_seconds()), 60)
+    await message.channel.send(f"⏳ Time until answer reveal: {mins} minutes {secs} seconds.", delete_after=10)
 
-@tasks.loop(time=time(hour=19, minute=0, tzinfo=timezone.utc))
-async def post_daily_riddle():
+
+@tasks.loop(minutes=1)
+async def daily_riddle_task():
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
-
+    now = datetime.now(timezone.utc)
     channel_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    if channel_id == 0:
+        return
+
     channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found")
+    if channel is None:
         return
 
-    # Pick and post new riddle
-    current_riddle = pick_next_riddle()
-    current_answer_revealed = False
-    correct_users.clear()
-    guess_attempts.clear()
-    deducted_for_user.clear()
+    # At 19:00 UTC (3 PM EST) post the riddle of the day
+    if now.time().hour == 19 and now.time().minute == 0:
+        current_riddle = pick_next_riddle()
+        current_answer_revealed = False
+        correct_users.clear()
+        guess_attempts.clear()
+        deducted_for_user.clear()
+        await channel.send(format_question_text(current_riddle))
 
-    text = format_question_text(current_riddle)
-    await channel.send(text)
+    # At 23:00 UTC (7 PM EST) reveal the answer
+    if now.time().hour == 23 and now.time().minute == 0 and current_riddle and not current_answer_revealed:
+        current_answer_revealed = True
+        await channel.send(f"🔔 The answer to today's riddle (ID {current_riddle['id']}) is:\n\n**{current_riddle.get('answer', 'N/A')}**\n\nGood luck tomorrow!")
 
-
-@tasks.loop(time=time(hour=3, minute=0, tzinfo=timezone.utc))
-async def reveal_answer():
-    global current_answer_revealed, streaks
-
-    channel_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
-    channel = client.get_channel(channel_id)
-    if not channel:
-        print("Channel not found")
-        return
-
-    if not current_riddle or current_answer_revealed:
-        return
-
-    current_answer_revealed = True
-    answer_text = current_riddle.get("answer", "No answer found")
-
-    # List users who answered correctly
-    if correct_users:
-        mentions = []
-        for uid in correct_users:
-            try:
-                user = await client.fetch_user(int(uid))
-                mentions.append(user.mention)
-            except:
-                mentions.append(f"<@{uid}>")
-        correct_str = ", ".join(mentions)
-        msg = (
-            f"✅ The answer to today's riddle is:\n**{answer_text}**\n\n"
-            f"🎉 Correct answers by: {correct_str}\n\n"
-            "💡 Use the /submitriddle command to submit your own riddle."
-        )
-    else:
-        msg = (
-            f"❌ No one answered today's riddle correctly.\n"
-            f"The answer was:\n**{answer_text}**\n\n"
-            "💡 Use the /submitriddle command to submit your own riddle."
-        )
-
-    await channel.send(msg)
-
-    # Reset streaks for users who did not answer correctly AND
-    # are not the submitter of the riddle
-    for uid in scores.keys():
-        if uid not in correct_users and uid != current_riddle.get("submitter_id"):
-            streaks[uid] = 0
-    save_all_scores()
-
-
+# --- On ready ---
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
-    try:
-        await tree.sync()
-        print("Commands synced")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
-    post_daily_riddle.start()
-    reveal_answer.start()
+    await tree.sync()
+    daily_riddle_task.start()
 
-
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-client.run(TOKEN)
+# --- Main ---
+if __name__ == "__main__":
+    token = os.getenv("DISCORD_TOKEN")
+    if not token:
+        print("ERROR: DISCORD_TOKEN environment variable not set.")
+        exit(1)
+    client.run(token)
