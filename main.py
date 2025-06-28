@@ -572,7 +572,7 @@ async def on_ready():
     await tree.sync()
 
     # —— BEGIN INTEGRATED TEST RIDDLE ——
-    TEST_CHANNEL_ID = 123456789012345678  # ← your test channel ID
+    TEST_CHANNEL_ID = 1387520693859782867  # ← your test channel ID
     channel = client.get_channel(TEST_CHANNEL_ID)
     if channel:
         # Set up the test riddle in your existing workflow
