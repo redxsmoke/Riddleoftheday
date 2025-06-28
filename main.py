@@ -7,14 +7,16 @@ from datetime import datetime, time, timezone, timedelta, date
 import random
 from discord import app_commands
 
-# --- Global Variables ---
+# —– Intents + Client initialization —–
 intents = discord.Intents.default()
-intents.members = True            # ← enables guild.members population
-intents.message_content = True    # ← if you need to read message content
-tree = app_commands.CommandTree(client)
+intents.members = True            # so guild.members is populated
+intents.message_content = True    # if you need to read message content
+
+client = discord.Client(intents=intents)
+tree   = app_commands.CommandTree(client)
 
 QUESTIONS_FILE = "submitted_questions.json"
-SCORES_FILE = "scores.json"
+SCORES_FILE   = "scores.json"
 STREAKS_FILE = "streaks.json"
 
 submitted_questions = []
