@@ -628,35 +628,36 @@ async def on_ready():
         f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
     )
 
-    async def reveal_startup_riddle():
-        print("⏳ Waiting 60 seconds before revealing the startup riddle answer...")
-        await asyncio.sleep(60)
+async def reveal_startup_riddle():
+    global current_answer_revealed  # MUST BE FIRST
 
-        if current_answer_revealed:
-            print("⚠️ Answer already revealed. Skipping startup reveal.")
-            return
+    print("⏳ Waiting 60 seconds before revealing the startup riddle answer...")
+    await asyncio.sleep(60)
 
-        if not current_riddle:
-            print("❌ No current riddle set for startup reveal.")
-            return
+    if current_answer_revealed:
+        print("⚠️ Answer already revealed. Skipping startup reveal.")
+        return
 
-        print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
-        await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
+    if not current_riddle:
+        print("❌ No current riddle set for startup reveal.")
+        return
 
-        if correct_users:
-            mentions = []
-            for user_id_str in correct_users:
-                try:
-                    user = await client.fetch_user(int(user_id_str))
-                    mentions.append(user.mention)
-                except Exception as e:
-                    print(f"Could not fetch user {user_id_str}: {e}")
+    print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
+    await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
 
-            if mentions:
-                await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+    if correct_users:
+        mentions = []
+        for user_id_str in correct_users:
+            try:
+                user = await client.fetch_user(int(user_id_str))
+                mentions.append(user.mention)
+            except Exception as e:
+                print(f"Could not fetch user {user_id_str}: {e}")
 
-        global current_answer_revealed
-        current_answer_revealed = True
+        if mentions:
+            await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+
+    current_answer_revealed = True
 
     client.loop.create_task(reveal_startup_riddle())
 
