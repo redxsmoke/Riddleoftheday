@@ -1,50 +1,92 @@
 [
   {
     "id": "1",
-    "question": "What has to be broken before you can use it?",
-    "answer": "An egg",
+    "question": "What has keys but can't open locks?",
+    "answer": "Piano",
     "submitter_id": null
   },
   {
     "id": "2",
-    "question": "I speak without a mouth and hear without ears. What am I?",
-    "answer": "An echo",
+    "question": "What has a neck but no head?",
+    "answer": "Bottle",
     "submitter_id": null
   },
   {
     "id": "3",
-    "question": "What gets wetter the more it dries?",
-    "answer": "A towel",
+    "question": "What can fill a room but takes up no space?",
+    "answer": "Light",
     "submitter_id": null
   },
   {
     "id": "4",
-    "question": "The more of me you take, the more you leave behind. What am I?",
-    "answer": "Footsteps",
+    "question": "What has teeth but cannot bite?",
+    "answer": "Comb",
     "submitter_id": null
   },
   {
     "id": "5",
-    "question": "What can travel around the world while staying in the same corner?",
-    "answer": "A stamp",
+    "question": "What runs but never walks?",
+    "answer": "River",
     "submitter_id": null
   },
   {
     "id": "6",
-    "question": "What has one eye but can’t see?",
-    "answer": "A needle",
+    "question": "What has a ring but no finger?",
+    "answer": "Phone",
     "submitter_id": null
   },
   {
     "id": "7",
-    "question": "What has hands but can’t clap?",
-    "answer": "A clock",
+    "question": "What comes down but never goes up?",
+    "answer": "Rain",
     "submitter_id": null
   },
   {
     "id": "8",
-    "question": "I’m tall when I’m young, and I’m short when I’m old. What am I?",
-    "answer": "A candle",
+    "question": "What is full of holes but still holds water?",
+    "answer": "Sponge",
+    "submitter_id": null
+  },
+  {
+    "id": "9",
+    "question": "What has legs but doesn't walk?",
+    "answer": "Table",
+    "submitter_id": null
+  },
+  {
+    "id": "10",
+    "question": "What can you catch but not throw?",
+    "answer": "Cold",
+    "submitter_id": null
+  },
+  {
+    "id": "11",
+    "question": "What begins with T, ends with T, and has T in it?",
+    "answer": "Teapot",
+    "submitter_id": null
+  },
+  {
+    "id": "12",
+    "question": "What has a head and a tail but no body?",
+    "answer": "Coin",
+    "submitter_id": null
+  },
+  {
+    "id": "13",
+    "question": "What has cities but no houses?",
+    "answer": "Map",
+    "submitter_id": null
+  },
+  {
+    "id": "14",
+    "question": "What has an eye but cannot see?",
+    "answer": "Hurricane",
+    "submitter_id": null
+  },
+  {
+    "id": "15",
+    "question": "What can be cracked, made, told, and played?",
+    "answer": "Joke",
     "submitter_id": null
   }
 ]
