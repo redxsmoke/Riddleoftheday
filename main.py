@@ -615,7 +615,6 @@ async def on_ready():
         print("❌ Could not find riddle channel.")
         return
 
-    # Reset all state variables BEFORE sending the riddle
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
@@ -623,45 +622,47 @@ async def on_ready():
     guess_attempts.clear()
     deducted_for_user.clear()
 
-    # Post the riddle (without answer)
+    # Post the startup riddle immediately
     await channel.send(
         f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
     )
 
-async def reveal_startup_riddle():
-    global current_answer_revealed  # MUST BE FIRST
+    # Schedule the reveal after 60 seconds
+    async def reveal_startup_riddle():
+        global current_answer_revealed
 
-    print("⏳ Waiting 60 seconds before revealing the startup riddle answer...")
-    await asyncio.sleep(60)
+        print("⏳ Waiting 60 seconds before revealing the startup riddle answer...")
+        await asyncio.sleep(60)
 
-    if current_answer_revealed:
-        print("⚠️ Answer already revealed. Skipping startup reveal.")
-        return
+        if current_answer_revealed:
+            print("⚠️ Answer already revealed. Skipping startup reveal.")
+            return
 
-    if not current_riddle:
-        print("❌ No current riddle set for startup reveal.")
-        return
+        if not current_riddle:
+            print("❌ No current riddle set for startup reveal.")
+            return
 
-    print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
-    await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
+        print(f"✅ Revealing answer for startup riddle {current_riddle['id']}")
+        await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
 
-    if correct_users:
-        mentions = []
-        for user_id_str in correct_users:
-            try:
-                user = await client.fetch_user(int(user_id_str))
-                mentions.append(user.mention)
-            except Exception as e:
-                print(f"Could not fetch user {user_id_str}: {e}")
+        if correct_users:
+            mentions = []
+            for user_id_str in correct_users:
+                try:
+                    user = await client.fetch_user(int(user_id_str))
+                    mentions.append(user.mention)
+                except Exception as e:
+                    print(f"Could not fetch user {user_id_str}: {e}")
 
-        if mentions:
-            await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+            if mentions:
+                await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
 
-    current_answer_revealed = True
+        current_answer_revealed = True
 
+    # Start the reveal task once
     client.loop.create_task(reveal_startup_riddle())
 
-    # Start your scheduled tasks after this setup
+    # Start the normal scheduled tasks as usual
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
