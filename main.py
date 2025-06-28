@@ -568,7 +568,7 @@ async def reveal_answer():
     current_answer_revealed = True
 
 
-@tasks.loop(time=time(19, 01, tzinfo=timezone.utc))
+@tasks.loop(time=time(19, 1, tzinfo=timezone.utc))
 async def post_no_one_guessed_message():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
