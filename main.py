@@ -647,16 +647,16 @@ async def on_ready():
 
         if correct_users:
             congrats_lines = []
-        for user_id_str in correct_users:
-        try:
-            user = await client.fetch_user(int(user_id_str))
-            uid = str(user.id)
-            sv = scores.get(uid, 0)
-            st = streaks.get(uid, 0)
-            rank = get_rank(sv, st)
-            congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
-        except Exception as e:
-            print(f"Could not fetch user {user_id_str}: {e}")
+            for user_id_str in correct_users:
+                try:
+                    user = await client.fetch_user(int(user_id_str))
+                    uid = str(user.id)
+                    sv = scores.get(uid, 0)
+                    st = streaks.get(uid, 0)
+                    rank = get_rank(sv, st)
+                    congrats_lines.append(f"{user.mention} — Score: **{sv}**, Streak: 🔥{st}, Rank: {rank}")
+                except Exception as e:
+                    print(f"Could not fetch user {user_id_str}: {e}")
 
         await channel.send("🎉 Congratulations to:\n" + "\n".join(congrats_lines))
 
