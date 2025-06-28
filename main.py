@@ -663,23 +663,7 @@ async def on_ready():
     daily_purge.start()
     notify_upcoming_riddle.start()
     post_riddle.start()
-    reveal_answer.start()
-    post_no_one_guessed_message.start()
-
-
-    # Start your regular scheduled tasks
-    daily_purge.start()
-    notify_upcoming_riddle.start()
-    post_riddle.start()
-    reveal_answer.start()
-    post_no_one_guessed_message.start()
-
-
-    # —— START DAILY SCHEDULED TASKS ——
-    daily_purge.start()
-    notify_upcoming_riddle.start()
-    post_riddle.start()
-    reveal_answer.start()
+   
 
 
 # --- Run bot ---
