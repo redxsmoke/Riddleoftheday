@@ -614,20 +614,20 @@ async def on_ready():
         print("❌ Could not find riddle channel.")
         return
 
-    # —— PURGE CHAT HISTORY ON STARTUP (WITH RATE LIMIT PROTECTION) ——
+    # Purge old messages if you want (optional)
     try:
         print("🧹 Starting channel purge...")
         async for msg in channel.history(limit=100):
             try:
                 await msg.delete()
-                await asyncio.sleep(0.4)  # Sleep to avoid rate limit
+                await asyncio.sleep(0.4)  # to avoid rate limits
             except discord.errors.HTTPException as e:
                 print(f"⚠️ Could not delete message {msg.id}: {e}")
         print("✅ Channel history purge completed.")
     except Exception as e:
         print(f"❌ Failed to purge channel: {e}")
 
-    # —— FULLY-INTEGRATED STARTUP RIDDLE (TODAY ONLY) ——
+    # Initialize the first riddle and reset state
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
     current_riddle = pick_next_riddle()
     current_answer_revealed = False
@@ -635,20 +635,44 @@ async def on_ready():
     guess_attempts.clear()
     deducted_for_user.clear()
 
+    # Post the riddle with a note about answer reveal delay
     await channel.send(
         f"🧩 **Startup Riddle {current_riddle['id']}:** {current_riddle['question']} *(Answer will be revealed in 1 minute)*"
     )
 
+    # Define the async task to reveal the answer after a delay
     async def reveal_startup_riddle():
-        await asyncio.sleep(60)
+        await asyncio.sleep(60)  # 60 seconds delay before revealing answer
+
+        # Send answer and congratulate correct guessers if any
         if current_riddle:
-            await channel.send(
-                f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}"
-            )
+            await channel.send(f"🔔 **Answer to riddle {current_riddle['id']}:** {current_riddle['answer']}")
+
+            if correct_users:
+                mentions = []
+                for user_id_str in correct_users:
+                    try:
+                        user = await client.fetch_user(int(user_id_str))
+                        mentions.append(user.mention)
+                    except Exception as e:
+                        print(f"Could not fetch user {user_id_str}: {e}")
+
+                if mentions:
+                    await channel.send(f"🎉 Congratulations to: {', '.join(mentions)} for guessing correctly!")
+
             global current_answer_revealed
             current_answer_revealed = True
 
+    # Schedule the startup answer reveal task without blocking on_ready()
     client.loop.create_task(reveal_startup_riddle())
+
+    # Start your regular scheduled tasks
+    daily_purge.start()
+    notify_upcoming_riddle.start()
+    post_riddle.start()
+    reveal_answer.start()
+    post_no_one_guessed_message.start()
+
 
     # —— START DAILY SCHEDULED TASKS ——
     daily_purge.start()
