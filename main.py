@@ -570,32 +570,6 @@ For scores above 50 points.
 async def on_ready():
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     await tree.sync()
-
-    # —— BEGIN TEST RIDDLE BLOCK ——
-    TEST_CHANNEL_ID = 1387520693859782867  # ← replace with your test channel ID
-    channel = client.get_channel(TEST_CHANNEL_ID)
-    if channel:
-        test_riddle = {
-            "id": "TEST1",
-            "question": "What has keys but can't open locks?",
-            "answer": "A piano"
-        }
-
-        # Post the test riddle immediately
-        await channel.send(
-            f"🧩 **Test Riddle {test_riddle['id']}:** {test_riddle['question']}"
-        )
-
-        # Schedule the answer reveal in 60 seconds
-        async def reveal_test_answer():
-            await asyncio.sleep(60)
-            await channel.send(
-                f"🔔 **Answer to {test_riddle['id']}:** {test_riddle['answer']}"
-            )
-
-        client.loop.create_task(reveal_test_answer())
-    # —— END TEST RIDDLE BLOCK ——
-
     # Start scheduled tasks
     daily_purge.start()
     notify_upcoming_riddle.start()
