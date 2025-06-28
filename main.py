@@ -283,7 +283,7 @@ async def score(interaction: discord.Interaction):
     st = streaks.get(uid, 0)
     await interaction.response.send_message(
         f"📊 {interaction.user.display_name}'s score: **{sv}**, 🔥 Streak: {st}\n🏅 {get_rank(sv, st)}",
-        ephemeral=True
+        ephemeral=False
     )
 
 
@@ -310,7 +310,7 @@ class LeaderboardView(discord.ui.View):
             except:
                 name = "Unknown"
             st = streaks.get(uid, 0)
-            embed.add_field(name=f"{i}. {name}", value=f"Score: {sv} | Streak: {st}\nRank: {get_rank(sv, st)}", inline=False)
+            embed.add_field(name=f"{i}. {name}", value=f"Score: {sv} | 🔥 Streak: {st}\n🏅Rank: {get_rank(sv, st)}", inline=False)
         return embed
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
