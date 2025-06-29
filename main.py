@@ -65,8 +65,17 @@ def get_rank(score, streak):
         max_score = max(scores.values())
         if score == max_score and max_score > 0:
             return "🍣 Master Sushi Chef (Top scorer)"
-    if streak >= 3:
-        return f"🔥 Streak Samurai (Solved {streak} riddles consecutively)"
+    if streak >= 30:
+        return "💚🔥 Wasabi Warlord (30+ day streak)"
+    elif streak >= 20:
+        return "🥢 Rollmaster Ronin (20+ day streak)"
+    elif streak >= 10:
+        return "🍣 Nigiri Ninja (10+ day streak)"
+    elif streak >= 5:
+        return "🍤 Tempura Titan (5+ day streak)"
+    elif streak >= 3:
+        return "🔥 Streak Samurai (3+ day streak)"
+    
     if score <= 5:
         return "Sushi Newbie 🍽️"
     elif 6 <= score <= 15:
@@ -544,7 +553,7 @@ async def post_riddle():
 
 from datetime import time, timezone
 
-@tasks.loop(time=time(19, 0, tzinfo=timezone.utc))
+@tasks.loop(time=time(23, 0, tzinfo=timezone.utc))
 async def reveal_answer():
     global current_answer_revealed
 
@@ -582,7 +591,7 @@ async def reveal_answer():
     current_answer_revealed = True
 
 
-@tasks.loop(time=time(19, 1, tzinfo=timezone.utc))
+@tasks.loop(time=time(23, 1, tzinfo=timezone.utc))
 async def post_no_one_guessed_message():
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     channel = client.get_channel(ch_id)
@@ -624,28 +633,24 @@ ADMIN ONLY COMMANDS
 @tree.command(name="ranks", description="Show rank descriptions")
 async def ranks(interaction: discord.Interaction):
     ranks_description = """
-**Riddle of the Day Ranks and Descriptions:**
+**🏅 Riddle of the Day Ranks**
 
-🍣 **Master Sushi Chef (Top scorer)**  
+🍣 **Master Sushi Chef**  
 Awarded to the user(s) with the highest score.
 
-🔥 **Streak Samurai**  
-Achieved by solving 3 or more riddles consecutively.
+🔥 **Streak-Based Titles** (based on consecutive correct riddles):
+• 🔥 **Streak Samurai** — 3-day streak  
+• 🍤 **Tempura Titan** — 5-day streak  
+• 🍣 **Nigiri Ninja** — 10-day streak  
+• 🥢 **Rollmaster Ronin** — 20-day streak  
+• 💚🔥 **Wasabi Warlord** — 30+ day streak
 
-Sushi Newbie 🍽️  
-For scores 0 to 5 points.
-
-Maki Novice 🍣  
-For scores between 6 and 15 points.
-
-Sashimi Skilled 🍤  
-For scores between 16 and 25 points.
-
-Brainy Botan 🧠  
-For scores between 26 and 50 points.
-
-Sushi Einstein 🧪  
-For scores above 50 points.
+🎯 **Score-Based Ranks**:
+• 🍽️ **Sushi Newbie** — 0 to 5 points  
+• 🍣 **Maki Novice** — 6 to 15 points  
+• 🍤 **Sashimi Skilled** — 16 to 25 points  
+• 🧠 **Brainy Botan** — 26 to 50 points  
+• 🧪 **Sushi Einstein** — 51+ points
 """
     await interaction.response.send_message(ranks_description, ephemeral=True)
 
