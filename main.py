@@ -16,7 +16,7 @@ from discord import app_commands
 
 
 
-# —– Intents + Client initialization —–
+# —– Intents + Client initialization —–-
 intents = discord.Intents.default()
 intents.members = True            # so guild.members is populated
 intents.message_content = True    # if you need to read message content
