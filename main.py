@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+NOTIFY_USER_ID = os.getenv("NOTIFY_USER_ID")
 STOP_WORDS = {"a", "an", "the", "is", "was", "were", "of", "to", "and", "in", "on", "at", "by"}
 def clean_and_filter(text):
     words = re.findall(r'\b\w+\b', text.lower())
@@ -100,7 +101,7 @@ def pick_next_riddle():
     return riddle
 
 def format_question_text(qdict):
-    base = f"@everyone {qdict['id']}. {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
+    base = f"{qdict['id']}. {qdict['question']} ***(Answer will be revealed at 23:00 UTC)***"
     
     # Add submitter mention if available
     if "submitter_id" in qdict:
@@ -236,7 +237,6 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             global max_id
             q = self.question.value.strip().replace("\n", " ").replace("\r", " ")
             a = self.answer.value.strip()
-
             q_normalized = q.lower().replace(" ", "")
             for existing in submitted_questions:
                 existing_q = existing["question"].strip().lower().replace(" ", "")
@@ -258,22 +258,19 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             save_json(QUESTIONS_FILE, submitted_questions)
 
             # Notify admins and moderators with Manage Messages permission
-            guild = interaction.guild
-            if guild:
-                submitter_name = interaction.user.display_name
-                for member in guild.members:
-                    if member.bot:
-                        continue
-                    perms = member.guild_permissions
-                    if perms.manage_messages:
-                        try:
-                            dm = await member.create_dm()
-                            await dm.send(
-                                f"🧠 @{submitter_name} has submitted a new Riddle of the Day. "
-                                "Use `/listriddles` to view the question and `/removeriddle` if moderation is needed."
-                            )
-                        except discord.Forbidden:
-                            pass  # Can't DM this member
+            if NOTIFY_USER_ID:
+                try:
+                    notify_user = await client.fetch_user(int(NOTIFY_USER_ID))
+                    dm = await notify_user.create_dm()
+                    submitter_name = interaction.user.display_name
+                    await dm.send(
+                        f"🧠 @{submitter_name} has submitted a new Riddle of the Day. "
+                        "Use `/listriddles` to view the question and `/removeriddle` if moderation is needed."
+                    )
+                except Exception as e:
+                    print(f"Failed to notify user {NOTIFY_USER_ID}: {e}")
+            else:
+                print("NOTIFY_USER_ID environment variable not set.")
 
             # Award point to submitter only once per day
             today = date.today()
@@ -307,6 +304,7 @@ class SubmitRiddleModal(discord.ui.Modal, title="Submit a New Riddle"):
             await interaction.response.send_message(
                 "⚠️ Something went wrong. Try again.", ephemeral=True
             )
+
 
 
 @tree.command(name="submitriddle", description="Submit a new riddle via a form")
