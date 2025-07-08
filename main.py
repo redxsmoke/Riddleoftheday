@@ -711,11 +711,9 @@ setup_test_sequence_commands(tree, client)
 
 @client.event
 async def on_message(message):
-    # Ignore bot messages
     if message.author.bot:
         return
 
-    # Only listen in the designated riddle channel
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     if message.channel.id != ch_id:
         return
@@ -725,19 +723,28 @@ async def on_message(message):
     user_id = str(message.author.id)
     content = message.content.strip()
 
-    # No active riddle or already revealed
+    # If no riddle is active or it's already revealed, ignore all messages (they're not guesses)
     if not current_riddle or current_answer_revealed:
         return
 
-    # Submitter cannot answer and doesn't lose streak
+    # Only block submitter IF the active riddle is theirs AND they are trying to guess it
     if current_riddle.get("submitter_id") == user_id:
-        try: await message.delete()
-        except: pass
-        await message.channel.send(
-            "⛔ You submitted this riddle and cannot answer it.",
-            delete_after=10
-        )
-        return
+        user_words = clean_and_filter(content)
+        answer_words = clean_and_filter(current_riddle["answer"])
+
+        # Only block if it looks like an answer attempt
+        if any(word in answer_words for word in user_words):
+            try:
+                await message.delete()
+            except:
+                pass
+            await message.channel.send(
+                "⛔ You submitted this riddle and cannot answer it.",
+                delete_after=10
+            )
+            return
+        else:
+            return 
 
     # If they've already answered correctly, ignore further guesses
     if user_id in correct_users:
