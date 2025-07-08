@@ -908,10 +908,100 @@ async def daily_riddle_post():
 
     print(f"Posted daily riddle #{riddle['id']}")
 
+from datetime import timedelta
+
+@tasks.loop(time=time(hour=23, minute=0, second=0))  # Runs at 23:00 UTC daily
+async def reveal_riddle_answer():
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+
+    if not current_riddle or current_answer_revealed:
+        return  # Nothing to reveal
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("Answer reveal skipped: Channel not found.")
+        return
+
+    answer = current_riddle.get("answer", "Unknown")
+    riddle_id = current_riddle.get("id", "???")
+
+    # Post the answer
+    embed = discord.Embed(
+        title=f"🔔 Answer to Riddle #{riddle_id}",
+        description=f"**Answer:** {answer}\n\n💡 Use `/submitriddle` to submit your own riddle!",
+        color=discord.Color.green()
+    )
+    await channel.send(embed=embed)
+
+    # Post congratulations
+    if correct_users:
+        max_score = max(scores.values()) if scores else 0
+        congrats_embed = discord.Embed(
+            title="🎊 Congratulations to the following users who solved today's riddle! 🎊",
+            color=discord.Color.gold()
+        )
+        description_lines = []
+        for idx, user_id_str in enumerate(correct_users, start=1):
+            try:
+                user = await client.fetch_user(int(user_id_str))
+                score_val = scores.get(user_id_str, 0)
+                streak_val = streaks.get(user_id_str, 0)
+
+                score_line = f"{score_val}"
+                if score_val == max_score and max_score > 0:
+                    score_line += " - 👑 🍣 Master Sushi Chef"
+
+                rank = get_rank(score_val)
+                streak_rank = get_streak_rank(streak_val)
+                streak_line = f"🔥{streak_val}"
+                if streak_rank:
+                    streak_line += f" - {streak_rank}"
+
+                description_lines.append(f"#{idx} {user.display_name}:")
+                description_lines.append(f"    • Score: {score_line}")
+                description_lines.append(f"    • Rank: {rank}")
+                description_lines.append(f"    • Streak: {streak_line}")
+                description_lines.append("")
+            except Exception:
+                description_lines.append(f"#{idx} <@{user_id_str}>")
+                description_lines.append("")
+        congrats_embed.description = "\n".join(description_lines)
+        await channel.send(embed=congrats_embed)
+    else:
+        await channel.send("😢 No one guessed the riddle correctly today.")
+
+    # Reset state
+    current_answer_revealed = True
+    current_riddle = None
+    correct_users.clear()
+    guess_attempts.clear()
+    deducted_for_user.clear()
+
+
+@client.event
+async def on_ready():
+    print(f"Bot logged in as {client.user} (ID: {client.user.id})")
+    try:
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} commands.")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
+
+    # <<< ADD THESE LINES RIGHT HERE >>>
+    daily_riddle_post.start()
+    riddle_announcement.start()
+    reveal_riddle_answer.start()
+
+    await daily_riddle_post_callback()
+
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     if not TOKEN:
         print("ERROR: DISCORD_BOT_TOKEN environment variable is not set.")
         exit(1)
 
+
+
     client.run(TOKEN)
+    
