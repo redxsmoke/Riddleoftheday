@@ -178,6 +178,7 @@ def get_rank(score, streak):
         return "Brainy Botan 🧠"
     else:
         return "Sushi Einstein 🧪"
+
 @tree.command(name="submitriddle", description="Submit a new riddle for the daily contest")
 @app_commands.describe(question="The riddle question", answer="The answer to the riddle")
 async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
@@ -423,6 +424,58 @@ async def create_leaderboard_embed():
     leaderboard_embed.set_footer(text="Ranks update automatically based on your progress.")
 
     return leaderboard_embed
+
+@tree.command(name="removeriddle", description="Remove a riddle by its number (ID)")
+@app_commands.describe(riddle_id="The ID number of the riddle to remove")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def removeriddle(interaction: discord.Interaction, riddle_id: int):
+    global submitted_questions, used_question_ids
+
+    # Convert ID to string to match stored riddles
+    riddle_id_str = str(riddle_id)
+
+    # Find riddle index by ID
+    index_to_remove = next((i for i, r in enumerate(submitted_questions) if str(r.get("id")) == riddle_id_str), None)
+
+    if index_to_remove is None:
+        await interaction.response.send_message(f"❌ No riddle found with ID #{riddle_id}.", ephemeral=True)
+        return
+
+    # Remove riddle
+    removed_riddle = submitted_questions.pop(index_to_remove)
+    used_question_ids.discard(riddle_id_str)
+
+    # Save changes
+    save_all_riddles()
+
+    await interaction.response.send_message(f"✅ Removed riddle #{riddle_id}: {removed_riddle.get('question')}", ephemeral=True)
+
+@tree.command(name="listriddles", description="List all submitted riddles with their numbers")
+async def listriddles(interaction: discord.Interaction):
+    if not submitted_questions:
+        await interaction.response.send_message("There are currently no riddles submitted.", ephemeral=True)
+        return
+
+    # Build paginated list if needed — but for simplicity, just show up to 15 riddles in one embed
+    max_display = 15
+    description_lines = []
+
+    for riddle in submitted_questions[:max_display]:
+        r_id = riddle.get("id")
+        q_text = riddle.get("question", "[No Question Text]")
+        description_lines.append(f"#{r_id}: {q_text}")
+
+    if len(submitted_questions) > max_display:
+        description_lines.append(f"...and {len(submitted_questions) - max_display} more riddles.")
+
+    embed = discord.Embed(
+        title="📜 Submitted Riddles",
+        description="\n".join(description_lines),
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text="Use /removeriddle <ID> to remove a riddle.")
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 
