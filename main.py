@@ -1,6 +1,7 @@
 import discord
 from discord.ext import tasks
-from discord import app_commands
+from discord import app_commands, Interaction, Embed
+from discord.ui import View, Button
 import asyncio
 import json
 import os
@@ -483,32 +484,73 @@ async def removeriddle(interaction: discord.Interaction, riddle_id: int):
 
     await interaction.response.send_message(f"✅ Removed riddle #{riddle_id}: {removed_riddle.get('question')}", ephemeral=True)
 
-@tree.command(name="listriddles", description="List all submitted riddles with their numbers")
+ITEMS_PER_PAGE = 10
+
+class ListRiddlesView(View):
+    def __init__(self, riddles, author_id):
+        super().__init__(timeout=180)  # 3 minutes timeout
+        self.riddles = riddles
+        self.author_id = author_id
+        self.current_page = 0
+        self.total_pages = max(1, (len(riddles) - 1) // ITEMS_PER_PAGE + 1)
+
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= self.total_pages - 1
+
+    def get_page_embed(self):
+        start = self.current_page * ITEMS_PER_PAGE
+        end = start + ITEMS_PER_PAGE
+        page_riddles = self.riddles[start:end]
+
+        embed = Embed(
+            title=f"📜 Submitted Riddles (Page {self.current_page + 1}/{self.total_pages})",
+            color=discord.Color.blurple()
+        )
+
+        if not page_riddles:
+            embed.description = "No riddles available."
+            return embed
+
+        desc_lines = []
+        for riddle in page_riddles:
+            desc_lines.append(f"#{riddle['id']}: {riddle['question']}")
+        embed.description = "\n".join(desc_lines)
+        embed.set_footer(text="Use the buttons below to navigate pages.")
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: Interaction, button: Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Only the command invoker can use these buttons.", ephemeral=True)
+            return
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_page_embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: Interaction, button: Button):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Only the command invoker can use these buttons.", ephemeral=True)
+            return
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_page_embed(), view=self)
+
+
+@tree.command(name="listriddles", description="List all submitted riddles with pagination")
 async def listriddles(interaction: discord.Interaction):
     if not submitted_questions:
-        await interaction.response.send_message("There are currently no riddles submitted.", ephemeral=True)
+        await interaction.response.send_message("No riddles have been submitted yet.", ephemeral=True)
         return
 
-    # Build paginated list if needed — but for simplicity, just show up to 15 riddles in one embed
-    max_display = 15
-    description_lines = []
-
-    for riddle in submitted_questions[:max_display]:
-        r_id = riddle.get("id")
-        q_text = riddle.get("question", "[No Question Text]")
-        description_lines.append(f"#{r_id}: {q_text}")
-
-    if len(submitted_questions) > max_display:
-        description_lines.append(f"...and {len(submitted_questions) - max_display} more riddles.")
-
-    embed = discord.Embed(
-        title="📜 Submitted Riddles",
-        description="\n".join(description_lines),
-        color=discord.Color.blurple()
-    )
-    embed.set_footer(text="Use /removeriddle <ID> to remove a riddle.")
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    view = ListRiddlesView(submitted_questions, interaction.user.id)
+    embed = view.get_page_embed()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 
