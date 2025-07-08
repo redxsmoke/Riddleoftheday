@@ -487,20 +487,20 @@ async def removeriddle(interaction: discord.Interaction, riddle_id: int):
 ITEMS_PER_PAGE = 10
 
 class ListRiddlesView(View):
-    def __init__(self, riddles, author_id):
-        super().__init__(timeout=180)  # 3 minutes timeout
+    def __init__(self, riddles, author_id, bot):
+        super().__init__(timeout=180)
         self.riddles = riddles
         self.author_id = author_id
         self.current_page = 0
         self.total_pages = max(1, (len(riddles) - 1) // ITEMS_PER_PAGE + 1)
-
+        self.bot = bot  # save bot/client to fetch users
         self.update_buttons()
 
     def update_buttons(self):
         self.prev_button.disabled = self.current_page == 0
         self.next_button.disabled = self.current_page >= self.total_pages - 1
 
-    def get_page_embed(self):
+    async def get_page_embed(self):
         start = self.current_page * ITEMS_PER_PAGE
         end = start + ITEMS_PER_PAGE
         page_riddles = self.riddles[start:end]
@@ -516,8 +516,14 @@ class ListRiddlesView(View):
 
         desc_lines = []
         for riddle in page_riddles:
-            desc_lines.append(f"#{riddle['id']}: {riddle['question']}")
-        embed.description = "\n".join(desc_lines)
+            try:
+                user = await self.bot.fetch_user(int(riddle['submitter_id']))
+                display_name = user.display_name if hasattr(user, 'display_name') else user.name
+            except Exception:
+                display_name = "Unknown User"
+            desc_lines.append(f"#{riddle['id']}: {riddle['question']}\n_(submitted by {display_name})_")
+
+        embed.description = "\n\n".join(desc_lines)
         embed.set_footer(text="Use the buttons below to navigate pages.")
         return embed
 
@@ -529,7 +535,8 @@ class ListRiddlesView(View):
         if self.current_page > 0:
             self.current_page -= 1
             self.update_buttons()
-            await interaction.response.edit_message(embed=self.get_page_embed(), view=self)
+            embed = await self.get_page_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
     async def next_button(self, interaction: Interaction, button: Button):
@@ -539,7 +546,8 @@ class ListRiddlesView(View):
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
             self.update_buttons()
-            await interaction.response.edit_message(embed=self.get_page_embed(), view=self)
+            embed = await self.get_page_embed()
+            await interaction.response.edit_message(embed=embed, view=self)
 
 
 @tree.command(name="listriddles", description="List all submitted riddles with pagination")
@@ -548,8 +556,8 @@ async def listriddles(interaction: discord.Interaction):
         await interaction.response.send_message("No riddles have been submitted yet.", ephemeral=True)
         return
 
-    view = ListRiddlesView(submitted_questions, interaction.user.id)
-    embed = view.get_page_embed()
+    view = ListRiddlesView(submitted_questions, interaction.user.id, interaction.client)
+    embed = await view.get_page_embed()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
