@@ -1002,7 +1002,7 @@ async def daily_riddle_post_callback():
     guess_attempts = {}
     deducted_for_user = set()
 
-    submitter_name = "Anonymous"
+    submitter_name = "Riddle of the day bot"
     if riddle.get("submitter_id"):
         user = client.get_user(int(riddle["submitter_id"]))
         if user:
