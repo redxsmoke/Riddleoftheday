@@ -179,7 +179,7 @@ def get_rank(score, streak):
     else:
         return "Sushi Einstein 🧪"
 
-@@tree.command(name="submitriddle", description="Submit a new riddle for the daily contest")
+@tree.command(name="submitriddle", description="Submit a new riddle for the daily contest")
 @app_commands.describe(question="The riddle question", answer="The answer to the riddle")
 async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
