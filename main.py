@@ -978,6 +978,44 @@ async def reveal_riddle_answer():
     guess_attempts.clear()
     deducted_for_user.clear()
 
+async def daily_riddle_post_callback():
+    global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
+
+    if current_riddle is not None:
+        print("⛔ Skipping manual riddle post: one already exists.")
+        return
+
+    channel_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
+    channel = client.get_channel(channel_id)
+    if not channel:
+        print("⚠️ Could not find channel for riddle post.")
+        return
+
+    if not submitted_questions:
+        print("⛔ No riddles available to post.")
+        return
+
+    riddle = pick_next_riddle()
+    current_riddle = riddle
+    current_answer_revealed = False
+    correct_users = set()
+    guess_attempts = {}
+    deducted_for_user = set()
+
+    submitter_name = "Anonymous"
+    if riddle.get("submitter_id"):
+        user = client.get_user(int(riddle["submitter_id"]))
+        if user:
+            submitter_name = user.display_name
+
+    embed = discord.Embed(
+        title=f"🧩 Riddle of the Day #{riddle['id']}",
+        description=f"**Riddle:** {riddle['question']}\n\n_(Riddle submitted by {submitter_name})_",
+        color=discord.Color.blurple()
+    )
+    await channel.send(embed=embed)
+    print(f"✅ Sent manual riddle post #{riddle['id']}.")
+
 
 @client.event
 async def on_ready():
