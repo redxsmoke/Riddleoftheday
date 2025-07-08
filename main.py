@@ -568,7 +568,7 @@ async def leaderboard(interaction: discord.Interaction):
     embed = await create_leaderboard_embed()
     await interaction.response.send_message(embed=embed)
 
-
+"""
 @tree.command(name="purge", description="Delete all messages in this channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def purge(interaction: discord.Interaction):
@@ -584,7 +584,8 @@ async def purge(interaction: discord.Interaction):
 
     deleted = await channel.purge(limit=None, check=is_not_pinned)
     await interaction.followup.send(f"🧹 Purged {len(deleted)} messages.", ephemeral=True)
-
+"""
+"""
 def setup_test_sequence_commands(tree, client):
     @tree.command(name="run_test_sequence", description="Run a full test riddle workflow")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -705,7 +706,7 @@ def setup_test_sequence_commands(tree, client):
         
         await channel.send("✅ Test sequence completed. You can run `/run_test_sequence` again to test.")
 
-
+"""
 
 setup_test_sequence_commands(tree, client)
 
