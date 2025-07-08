@@ -706,9 +706,10 @@ def setup_test_sequence_commands(tree, client):
         
         await channel.send("✅ Test sequence completed. You can run `/run_test_sequence` again to test.")
 
+setup_test_sequence_commands(tree, client)
 """
 
-setup_test_sequence_commands(tree, client)
+
 
 @client.event
 async def on_message(message):
