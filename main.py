@@ -184,17 +184,7 @@ def get_rank(score, streak):
 async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
 
-    if current_riddle is not None:
-        await interaction.response.send_message("❌ There is already an active riddle. Please wait for it to finish.", ephemeral=True)
-        return
-
-    question = question.strip()
-    answer = answer.strip().lower()
-
-    if not question or not answer:
-        await interaction.response.send_message("❌ Question and answer cannot be empty.", ephemeral=True)
-        return
-
+    # Your existing validation and creation logic here...
     new_id = get_next_id()
     new_riddle = {
         "id": new_id,
@@ -217,6 +207,19 @@ async def submitriddle(interaction: discord.Interaction, question: str, answer: 
         color=discord.Color.blurple()
     )
     await interaction.response.send_message(embed=embed)
+
+    # --- New part: send DM to notify user ---
+    notify_user_id = os.getenv("NOTIFY_USER_ID")
+    if notify_user_id:
+        notify_user = await client.fetch_user(int(notify_user_id))
+        if notify_user:
+            try:
+                await notify_user.send(
+                    f"@{interaction.user.display_name} has submitted a new riddle. "
+                    "Use `/listriddles` to view the riddle and `/removeriddle` if moderation is needed."
+                )
+            except Exception as e:
+                print(f"Failed to send DM to notify user: {e}")
 
 
 def ensure_user_initialized(uid: str):
