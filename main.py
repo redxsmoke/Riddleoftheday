@@ -179,12 +179,30 @@ def get_rank(score, streak):
     else:
         return "Sushi Einstein 🧪"
 
-@tree.command(name="submitriddle", description="Submit a new riddle for the daily contest")
+@@tree.command(name="submitriddle", description="Submit a new riddle for the daily contest")
 @app_commands.describe(question="The riddle question", answer="The answer to the riddle")
 async def submitriddle(interaction: discord.Interaction, question: str, answer: str):
     global current_riddle, current_answer_revealed, correct_users, guess_attempts, deducted_for_user
 
-    # Your existing validation and creation logic here...
+    question = question.strip()
+    answer = answer.strip().lower()
+
+    if not question or not answer:
+        await interaction.response.send_message("❌ Question and answer cannot be empty.", ephemeral=True)
+        return
+
+    # Check for duplicate question (case-insensitive, ignoring extra spaces)
+    normalized_question = " ".join(question.lower().split())
+    for q in submitted_questions:
+        existing_question = q.get("question", "")
+        normalized_existing = " ".join(existing_question.lower().split())
+        if normalized_question == normalized_existing:
+            await interaction.response.send_message(
+                "❌ This riddle has already been submitted. Please try a different one.",
+                ephemeral=True
+            )
+            return
+
     new_id = get_next_id()
     new_riddle = {
         "id": new_id,
@@ -208,18 +226,30 @@ async def submitriddle(interaction: discord.Interaction, question: str, answer: 
     )
     await interaction.response.send_message(embed=embed)
 
-    # --- New part: send DM to notify user ---
+    # Notify moderation user
     notify_user_id = os.getenv("NOTIFY_USER_ID")
     if notify_user_id:
-        notify_user = await client.fetch_user(int(notify_user_id))
-        if notify_user:
-            try:
+        try:
+            notify_user = await client.fetch_user(int(notify_user_id))
+            if notify_user:
                 await notify_user.send(
                     f"@{interaction.user.display_name} has submitted a new riddle. "
                     "Use `/listriddles` to view the riddle and `/removeriddle` if moderation is needed."
                 )
-            except Exception as e:
-                print(f"Failed to send DM to notify user: {e}")
+        except Exception as e:
+            print(f"Failed to send DM to notify user: {e}")
+
+    # DM the submitter with confirmation and info
+    dm_message = (
+        "✅ Thank you for submitting your riddle! It has been added to the queue.\n\n"
+        "📌 Please note that on the day your riddle is posted, you won’t be able to answer it yourself.\n"
+        "🎉 Your score has already been increased by 1, and your streak will remain intact. Keep up the great work!"
+    )
+    try:
+        await interaction.user.send(dm_message)
+    except Exception:
+        pass
+
 
 
 def ensure_user_initialized(uid: str):
