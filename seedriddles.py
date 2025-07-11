@@ -19,20 +19,26 @@ riddles = [
     {"riddle_id": 15, "user_id": 1, "question": "What breaks yet never falls, and what falls yet never breaks?", "answer": "day and night"},
 ]
 
-async def seed_riddles():
-    if db.db_pool is None:
-        raise RuntimeError("Database pool not initialized")
+async with db.db_pool.acquire() as conn:
+    # Ensure the primary key constraint exists (do this only once!)
+    try:
+        await conn.execute("""
+            ALTER TABLE user_submitted_questions
+            ADD CONSTRAINT user_submitted_questions_pkey PRIMARY KEY (riddle_id)
+        """)
+        print("✅ Primary key added to riddle_id")
+    except Exception as e:
+        print(f"⚠️ Skipping primary key creation (maybe already exists): {e}")
 
+    # Now insert the riddles safely
     now = datetime.utcnow()
-
-    async with db.db_pool.acquire() as conn:
-        for r in riddles:
-            await conn.execute(
-                """
-                INSERT INTO user_submitted_questions (riddle_id, user_id, question, answer, created_at, posted_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (riddle_id) DO NOTHING
-                """,
-                r["riddle_id"], r["user_id"], r["question"], r["answer"], now, None
-            )
-            print(f"✅ Inserted riddle #{r['riddle_id']}")
+    for r in riddles:
+        await conn.execute(
+            """
+            INSERT INTO user_submitted_questions (riddle_id, user_id, question, answer, created_at, posted_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (riddle_id) DO NOTHING
+            """,
+            r["riddle_id"], r["user_id"], r["question"], r["answer"], now, None
+        )
+        print(f"✅ Inserted riddle #{r['riddle_id']}")
