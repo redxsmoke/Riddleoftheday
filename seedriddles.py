@@ -39,5 +39,3 @@ async def seed_riddles():
         print(f"Inserted riddle #{r['riddle_id']}")
     await conn.close()
 
-if __name__ == "__main__":
-    asyncio.run(seed_riddles())
