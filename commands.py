@@ -80,7 +80,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         if db_pool is None:
             print("[myranks] ERROR: db_pool is None (DB not initialized)")
-            await interaction.response.send_message("Database connection not initialized.", ephemeral=True)
+            await interaction.response.send_message("Database connection not initialized.", ephemeral=False)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -99,7 +99,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
             print(f"[myranks] ERROR querying DB: {e}")
             import traceback
             traceback.print_exc()
-            await interaction.followup.send("❌ Database query failed.", ephemeral=True)
+            await interaction.followup.send("❌ Database query failed.", ephemeral=False)
             return
 
         score_val = row["score"] if row else 0
@@ -431,7 +431,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
     @tree.command(name="leaderboard", description="Show the riddle leaderboard with pagination")
     async def leaderboard(interaction: Interaction):
         print("[leaderboard] Command invoked")
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         try:
             uid = interaction.user.id
@@ -444,7 +444,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
             filtered_users = [row["user_id"] for row in rows]
             if not filtered_users:
-                await interaction.followup.send("No leaderboard data available.", ephemeral=True)
+                await interaction.followup.send("No leaderboard data available.", ephemeral=False)
                 print("[leaderboard] No leaderboard data available")
                 return
 

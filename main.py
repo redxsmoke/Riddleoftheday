@@ -18,6 +18,9 @@ from views import LeaderboardView, create_leaderboard_embed
 from db import create_db_pool, upsert_user, get_user, insert_submitted_question, get_all_submitted_questions, increment_score, increment_streak, get_score, get_all_scores_and_streaks
 
 
+from seedriddles import seed_riddles
+
+
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -549,6 +552,7 @@ async def run_bot():
         print(f"❌ Failed to connect to the database: {e}")
         exit(1)
 
+    await seed_riddles
     await client.start(TOKEN)
 
 
