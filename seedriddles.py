@@ -1,6 +1,5 @@
-import asyncio
-import asyncpg
 from datetime import datetime
+import db  # uses db.db_pool from main.py
 
 riddles = [
     {"riddle_id": 1, "user_id": 1, "question": "I speak without a mouth and hear without ears. I have nobody, but I come alive with wind. What am I?", "answer": "shadow"},
