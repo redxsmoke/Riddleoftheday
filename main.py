@@ -552,7 +552,7 @@ async def run_bot():
         print(f"❌ Failed to connect to the database: {e}")
         exit(1)
 
-    await seed_riddles
+    await seed_riddles()
     await client.start(TOKEN)
 
 
