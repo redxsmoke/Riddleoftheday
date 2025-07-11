@@ -1,5 +1,5 @@
 from datetime import datetime
-import db  # uses db.db_pool from main.py
+import db  # uses the db.db_pool shared by main.py
 
 riddles = [
     {"riddle_id": 1, "user_id": 1, "question": "I speak without a mouth and hear without ears. I have nobody, but I come alive with wind. What am I?", "answer": "shadow"},
@@ -20,22 +20,19 @@ riddles = [
 ]
 
 async def seed_riddles():
-    conn = await asyncpg.connect(
-        user='your_db_user',
-        password='your_db_password',
-        database='your_db_name',
-        host='your_db_host'
-    )
-    now = datetime.utcnow()
-    for r in riddles:
-        await conn.execute(
-            """
-            INSERT INTO user_submitted_questions (riddle_id, user_id, question, answer, created_at, posted_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (riddle_id) DO NOTHING
-            """,
-            r["riddle_id"], r["user_id"], r["question"], r["answer"], now, None
-        )
-        print(f"Inserted riddle #{r['riddle_id']}")
-    await conn.close()
+    if db.db_pool is None:
+        raise RuntimeError("Database pool not initialized")
 
+    now = datetime.utcnow()
+
+    async with db.db_pool.acquire() as conn:
+        for r in riddles:
+            await conn.execute(
+                """
+                INSERT INTO user_submitted_questions (riddle_id, user_id, question, answer, created_at, posted_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (riddle_id) DO NOTHING
+                """,
+                r["riddle_id"], r["user_id"], r["question"], r["answer"], now, None
+            )
+            print(f"✅ Inserted riddle #{r['riddle_id']}")
