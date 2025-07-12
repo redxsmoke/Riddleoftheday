@@ -118,7 +118,8 @@ async def on_message(message):
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     if message.channel.id != ch_id:
         return
-
+    
+    await ensure_user_exists(message.author.id)
     global correct_users, guess_attempts, deducted_for_user, current_riddle, current_answer_revealed
 
     user_id = str(message.author.id)
