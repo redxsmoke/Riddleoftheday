@@ -435,67 +435,95 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         try:
             uid = interaction.user.id
-            print(f"[submitted riddle] Ensuring user {uid} exists in DB")
+            print(f"[leaderboard] Ensuring user {uid} exists in DB")
             await ensure_user_exists(uid)
 
             async with db_pool.acquire() as conn:
                 rows = await conn.fetch("SELECT user_id, score, streak FROM users WHERE score >= 1 OR streak >= 1")
-            print(f"[leaderboard] Fetched {len(rows)} users")
 
-            filtered_users = [row["user_id"] for row in rows]
-            if not filtered_users:
+            print(f"[leaderboard] Fetched {len(rows)} users")
+            if not rows:
                 await interaction.followup.send("No leaderboard data available.", ephemeral=False)
-                print("[leaderboard] No leaderboard data available")
                 return
 
-            rows.sort(key=lambda r: (r["score"], r["streak"]), reverse=True)
+            # Sort by score and streak DESCENDING
+            sorted_rows = sorted(rows, key=lambda r: (r["score"], r["streak"]), reverse=True)
+            max_score = sorted_rows[0]["score"] if sorted_rows else 0
 
-            view = LeaderboardView(client, filtered_users, per_page=10)
-            initial_users = filtered_users[:10]
+            # Prepare pagination
+            per_page = 10
+            pages = [
+                sorted_rows[i:i + per_page]
+                for i in range(0, len(sorted_rows), per_page)
+            ]
+            total_pages = len(pages)
 
-            embed = Embed(
-                title=f"🏆 Riddle Leaderboard (Page 1 / {(len(filtered_users) - 1) // 10 + 1})",
-                color=discord.Color.gold()
-            )
+            # --- Helper to build the leaderboard embed ---
+            async def build_embed(page_index: int):
+                page = pages[page_index]
+                embed = Embed(
+                    title=f"🏆 Riddle Leaderboard (Page {page_index + 1}/{total_pages})",
+                    color=discord.Color.gold()
+                )
+                description_lines = []
 
-            max_score = max((row["score"] for row in rows), default=0)
+                for idx, row in enumerate(page, start=1 + page_index * per_page):
+                    user_id = row["user_id"]
+                    try:
+                        user = await client.fetch_user(user_id)
+                        score = row["score"]
+                        streak = row["streak"]
 
-            description_lines = []
-            for idx, user_id in enumerate(initial_users, start=1):
-                try:
-                    user = await client.fetch_user(int(user_id))
-                    user_row = next((r for r in rows if r["user_id"] == user_id), None)
-                    score_val = user_row["score"] if user_row else 0
-                    streak_val = user_row["streak"] if user_row else 0
+                        score_line = f"{score}"
+                        if score == max_score and max_score > 0:
+                            score_line += " 👑 🍣 Master Sushi Chef"
 
-                    score_line = f"{score_val}"
-                    if score_val == max_score and max_score > 0:
-                        score_line += " - 👑 🍣 Master Sushi Chef"
+                        rank = get_rank(score)
+                        streak_rank = get_streak_rank(streak)
+                        streak_text = f"🔥{streak}"
+                        if streak_rank:
+                            streak_text += f" — {streak_rank}"
 
-                    rank = get_rank(score_val)
-                    streak_rank = get_streak_rank(streak_val)
-                    streak_text = f"🔥{streak_val}"
-                    if streak_rank:
-                        streak_text += f" - {streak_rank}"
+                        description_lines.append(
+                            f"**#{idx} {user.display_name}**\n"
+                            f"• Score: {score_line}\n"
+                            f"• Streak: {streak_text}\n"
+                            f"• Rank: {rank}\n"
+                        )
 
-                    description_lines.append(f"#{idx} {user.display_name}:")
-                    description_lines.append(f"    • Score: {score_line}")
-                    description_lines.append(f"    • Streak: {streak_text}")
-                    description_lines.append(f"    • Rank: {rank}")
+                    except Exception:
+                        description_lines.append(f"**#{idx} Unknown User (ID: {user_id})**\n")
 
-                except Exception:
-                    description_lines.append(f"#{idx} Unknown User (ID: {user_id})")
+                embed.description = "\n".join(description_lines)
+                return embed
 
-            embed.description = "\n".join(description_lines)
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            print("[leaderboard] Leaderboard embed sent")
+            # --- Pagination view ---
+            class LeaderboardPaginator(View):
+                def __init__(self):
+                    super().__init__(timeout=120)
+                    self.page_index = 0
+
+                @discord.ui.button(label="⏮️ Prev", style=discord.ButtonStyle.secondary)
+                async def prev(self, interaction: Interaction, button: Button):
+                    if self.page_index > 0:
+                        self.page_index -= 1
+                        embed = await build_embed(self.page_index)
+                        await interaction.response.edit_message(embed=embed, view=self)
+
+                @discord.ui.button(label="Next ⏭️", style=discord.ButtonStyle.secondary)
+                async def next(self, interaction: Interaction, button: Button):
+                    if self.page_index < total_pages - 1:
+                        self.page_index += 1
+                        embed = await build_embed(self.page_index)
+                        await interaction.response.edit_message(embed=embed, view=self)
+
+            view = LeaderboardPaginator()
+            initial_embed = await build_embed(0)
+            await interaction.followup.send(embed=initial_embed, view=view)
 
         except Exception as e:
             print(f"[leaderboard] ERROR: {e}")
-            try:
-                await interaction.followup.send("❌ An error occurred while fetching the leaderboard.", ephemeral=True)
-            except Exception:
-                pass
+            await interaction.followup.send("❌ An error occurred while fetching the leaderboard.", ephemeral=True)
 
 
 
