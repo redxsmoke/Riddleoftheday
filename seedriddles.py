@@ -1,7 +1,8 @@
+"""
 from datetime import datetime
 import db  # uses db.db_pool shared by main.py
 import asyncpg
-"""
+
 async def alter_riddle_id_pk_and_autoincrement():
     async with db.db_pool.acquire() as conn:
         try:
