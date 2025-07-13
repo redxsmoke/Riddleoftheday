@@ -552,9 +552,9 @@ async def run_bot():
     except Exception as e:
         print(f"❌ Failed to connect to the database: {e}")
         exit(1)
-  """
+    """
     await alter_riddle_id_pk_and_autoincrement()
-  """  
+    """
     await client.start(TOKEN)
 
 
