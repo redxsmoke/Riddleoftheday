@@ -17,9 +17,8 @@ import commands
 from views import LeaderboardView, create_leaderboard_embed
 from db import create_db_pool, upsert_user, get_user, insert_submitted_question, get_all_submitted_questions, increment_score, increment_streak, get_score, get_all_scores_and_streaks
 
-"""
 from seedriddles import alter_riddle_id_pk_and_autoincrement
-"""
+
 
 
 intents = discord.Intents.default()
@@ -119,8 +118,7 @@ async def on_message(message):
     ch_id = int(os.getenv("DISCORD_CHANNEL_ID") or 0)
     if message.channel.id != ch_id:
         return
-    
-    await ensure_user_exists(message.author.id)
+
     global correct_users, guess_attempts, deducted_for_user, current_riddle, current_answer_revealed
 
     user_id = str(message.author.id)
@@ -554,9 +552,7 @@ async def run_bot():
         print(f"❌ Failed to connect to the database: {e}")
         exit(1)
 
-    """
     await alter_riddle_id_pk_and_autoincrement()
-    """
     await client.start(TOKEN)
 
 
