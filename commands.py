@@ -104,19 +104,38 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         score_val = row["score"] if row else 0
         streak_val = row["streak"] if row else 0
+        user_total = score_val + streak_val
 
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT score, streak FROM users")
+                max_total = 0
+                for r in rows:
+                    s = r["score"] or 0
+                    st = r["streak"] or 0
+                    total = s + st
+                    if total > max_total:
+                        max_total = total
+        except Exception as e:
+            print(f"[myranks] ERROR fetching global score+streak: {e}")
+            max_total = 0
+
+        # Calculate ranks
         rank = get_rank(score_val)
         streak_rank = get_streak_rank(streak_val)
+
+        score_text = f"Score: {score_val}"
+        if user_total == max_total and user_total > 0:
+            score_text += " 🍣- Master Sushi Chef"
+
+        streak_text = f"Streak: 🔥{streak_val}"
+        if streak_rank:
+            streak_text += f" — {streak_rank}"
 
         embed = Embed(
             title=f"📊 Your Riddle Stats, {interaction.user.display_name}",
             color=discord.Color.green()
         )
-
-        score_text = f"Score: {score_val} {'🍣- Master Sushi Chef' if score_val > 0 else ''}"
-        streak_text = f"Streak: 🔥{streak_val}"
-        if streak_rank:
-            streak_text += f" — {streak_rank}"
 
         embed.add_field(name="Score", value=score_text, inline=False)
         embed.add_field(name="Streak", value=streak_text, inline=False)

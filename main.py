@@ -84,9 +84,9 @@ async def format_question_embed(qdict, submitter=None):
 
 
 
-def get_rank(score, streak=0):
-    # Example rank calculation, customize as needed
-    if score > 0:
+def get_rank(score=0, streak=0):
+    # Prioritize streak if provided
+    if streak > 0:
         if streak >= 30:
             return "💚🔥 Wasabi Warlord (30+ day streak)"
         elif streak >= 20:
@@ -97,18 +97,23 @@ def get_rank(score, streak=0):
             return "🍤 Tempura Titan (5+ day streak)"
         elif streak >= 3:
             return "🔥 Streak Samurai (3+ day streak)"
-        if score <= 5:
-            return "Sushi Newbie 🍽️"
-        elif 6 <= score <= 15:
-            return "Maki Novice 🍣"
-        elif 16 <= score <= 25:
-            return "Sashimi Skilled 🍤"
-        elif 26 <= score <= 50:
-            return "Brainy Botan 🧠"
         else:
-            return "Sushi Einstein 🧪"
-    else:
+            return "Streak Starter 🌱"
+
+    # Fallback to score if no streak
+    if score <= 0:
         return "Sushi Newbie 🍽️"
+    elif score <= 5:
+        return "Sushi Newbie 🍽️"
+    elif score <= 15:
+        return "Maki Novice 🍣"
+    elif score <= 25:
+        return "Sashimi Skilled 🍤"
+    elif score <= 50:
+        return "Brainy Botan 🧠"
+    else:
+        return "Sushi Einstein 🧪"
+
 
 
 @client.event
