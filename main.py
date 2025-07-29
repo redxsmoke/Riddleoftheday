@@ -433,7 +433,7 @@ async def reveal_riddle_answer():
                     # Calculate ranks
                     score_rank = get_rank(score, 0)
                     streak_rank = get_rank(0, streak)
-                    master_chef = " 🍣 Master Sushi Chef" if score == max_score and score > 0 else ""
+                    master_chef = " 👑⭐ Master Sushi Chef" if score == max_score and score > 0 else ""
 
                     lines.append(f"#{i} {user.mention}")
                     lines.append(f"• 🧠 Score: **{score}**{master_chef}")

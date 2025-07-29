@@ -126,7 +126,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         score_text = f"{score_val}"
         if user_total == max_total and user_total > 0:
-            score_text += " 🍣- Master Sushi Chef"
+            score_text += " 👑⭐- Master Sushi Chef"
 
         streak_text = f"{streak_val}"
 
@@ -362,7 +362,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         embed.add_field(
             name="👑 Top Rank",
-            value="**🍣 Master Sushi Chef** — Awarded to the user(s) with the highest score + streak.",
+            value="**👑⭐ Master Sushi Chef** — Awarded to the user(s) with the highest score + streak.",
             inline=False
         )
 
@@ -495,7 +495,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
                         score_line = f"{score}"
                         if score == max_score and max_score > 0:
-                            score_line += " 👑 🍣 Master Sushi Chef"
+                            score_line += " 👑⭐ Master Sushi Chef"
 
                         rank = get_rank(score)
                         streak_rank = get_streak_rank(streak)

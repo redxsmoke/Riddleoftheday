@@ -64,7 +64,7 @@ class LeaderboardView(View):
 
                 score_line = f"{score_val}"
                 if score_val == max_score and max_score > 0:
-                    score_line += " - 👑 🍣 Master Sushi Chef"
+                    score_line += " - 👑⭐ Master Sushi Chef"
 
                 rank = await get_rank(score_val)
                 streak_rank = await get_streak_rank(streak_val)
@@ -121,7 +121,7 @@ async def create_leaderboard_embed(client):
 
             score_line = f"    • Score: {score_val}"
             if score_val == max_score and max_score > 0:
-                score_line += " — 👑 🍣 Master Sushi Chef"
+                score_line += " — 👑⭐ Master Sushi Chef"
 
             rank = await get_rank(score_val)
             streak_title = await get_streak_rank(streak_val)
