@@ -124,13 +124,11 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
         rank = get_rank(score_val)
         streak_rank = get_streak_rank(streak_val)
 
-        score_text = f"Score: {score_val}"
+        score_text = f"{score_val}"
         if user_total == max_total and user_total > 0:
             score_text += " 🍣- Master Sushi Chef"
 
-        streak_text = f"Streak: 🔥{streak_val}"
-        if streak_rank:
-            streak_text += f" — {streak_rank}"
+        streak_text = f"{streak_val}"
 
         embed = Embed(
             title=f"📊 Your Riddle Stats, {interaction.user.display_name}",
@@ -138,8 +136,10 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
         )
 
         embed.add_field(name="Score", value=score_text, inline=False)
-        embed.add_field(name="Streak", value=streak_text, inline=False)
         embed.add_field(name="Rank", value=rank or "No rank", inline=False)
+        embed.add_field(name="Streak", value=streak_text, inline=False)
+        embed.add_field(name="Streak Rank", value=streak_rank or "No streak rank", inline=False)
+
 
         try:
             await interaction.followup.send(embed=embed, ephemeral=True)
