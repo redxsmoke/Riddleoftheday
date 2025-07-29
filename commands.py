@@ -498,20 +498,26 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
                             score_line += " 👑⭐ Master Sushi Chef"
 
                         rank = get_rank(score)
-                        streak_rank = get_streak_rank(streak)
-                        streak_text = f"🔥{streak}"
-                        if streak_rank:
-                            streak_text += f" — {streak_rank}"
 
-                        description_lines.append(
-                            f"**#{idx} {user.display_name}**\n"
-                            f"• Score: {score_line}\n"
-                            f"• Streak: {streak_text}\n"
-                            f"• Rank: {rank}\n"
-                        )
+                        # Show streak rank only if streak > 3
+                        streak_rank = None
+                        if streak >= 3:
+                            streak_rank = get_streak_rank(streak)
+
+                        embed_lines = [
+                            f"**#{idx} {user.display_name}**",
+                            f"• Score: {score_line}",
+                            f"• Rank: {rank or 'No rank'}",
+                            f"• Streak: {streak}"
+                        ]
+                        if streak_rank:
+                            embed_lines.append(f"• Streak Rank: {streak_rank}")
+
+                        description_lines.append("\n".join(embed_lines) + "\n")
 
                     except Exception:
                         description_lines.append(f"**#{idx} Unknown User (ID: {user_id})**\n")
+
 
                 embed.description = "\n".join(description_lines)
                 return embed
