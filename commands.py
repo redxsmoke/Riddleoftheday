@@ -382,6 +382,8 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
             inline=False
         )
 
+
+
         embed.add_field(
             name="🎯 Score-Based Ranks",
             value=(

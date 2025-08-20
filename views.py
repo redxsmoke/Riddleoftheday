@@ -19,7 +19,7 @@ async def get_rank(score):
 async def get_streak_rank(streak):
     # Stub or fill in your streak rank logic async if needed
     if streak >= 30:
-        return "💚🔥 Wasabi Warlord (30+ day streak)"
+        return "👑⛳ Hole in One Legend (30+ day streak)"
     return None
 
 
