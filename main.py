@@ -88,31 +88,31 @@ def get_rank(score=0, streak=0):
     # Prioritize streak if provided
     if streak > 0:
         if streak >= 30:
-            return "💚🔥 Wasabi Warlord (30+ day streak)"
+            return "👑⛳ Hole in One Legend (30+ day streak)"
         elif streak >= 20:
-            return "🥢 Rollmaster Ronin (20+ day streak)"
+            return "🦅 Eagle Master (20+ day streak)"
         elif streak >= 10:
-            return "🍣 Nigiri Ninja (10+ day streak)"
+            return "🐦 Birdie Streaker (10+ day streak)"
         elif streak >= 5:
-            return "🍤 Tempura Titan (5+ day streak)"
+            return "🐤 Par Player (5+ day streak)"
         elif streak >= 3:
-            return "🔥 Streak Samurai (3+ day streak)"
+            return "🏌️ Duffer (3+ day streak)"
         else:
-            return "Streak Starter 🌱"
+            return "Greenhorn 🌱"
 
     # Fallback to score if no streak
     if score <= 0:
-        return "Sushi Newbie 🍽️"
+        return "Dice Roller 🎲"
     elif score <= 5:
-        return "Sushi Newbie 🍽️"
+        return "Safe Square User ⭐ "
     elif score <= 15:
-        return "Maki Novice 🍣"
+        return "Triple Six Samauri 🎲🥷"
     elif score <= 25:
-        return "Sashimi Skilled 🍤"
+        return "Piece Eater 🏠🔙 "
     elif score <= 50:
-        return "Brainy Botan 🧠"
+        return "Safe Zone Master 🔒"
     else:
-        return "Sushi Einstein 🧪"
+        return "Goal Collector 👑🥅"
 
 
 
@@ -433,7 +433,7 @@ async def reveal_riddle_answer():
                     # Calculate ranks
                     score_rank = get_rank(score, 0)
                     streak_rank = get_rank(0, streak)
-                    master_chef = " 👑⭐ Master Sushi Chef" if score == max_score and score > 0 else ""
+                    master_chef = " 🎲⛳ Plato Master" if score == max_score and score > 0 else ""
 
                     lines.append(f"#{i} {user.mention}")
                     lines.append(f"• 🧠 Score: **{score}**{master_chef}")

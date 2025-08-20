@@ -20,31 +20,35 @@ def set_db_pool(pool):
 
 
 # Utility functions for ranks (unchanged)
-def get_rank(score):
-    if score <= 10:
-        return "🍽️ Sushi Newbie"
-    elif 11 <= score <= 35:
-        return "🍣 Maki Novice"
-    elif 36 <= score <= 65:
-        return "🍤 Sashimi Skilled"
-    elif 66 <= score <= 99:
-        return "🧠 Brainy Botan"
-    else:
-        return "🧪 Sushi Einstein"
+def get_rank(score=0, streak=0):
+    # Prioritize streak if provided
+    if streak > 0:
+        if streak >= 30:
+            return "👑⛳ Hole in One Legend (30+ day streak)"
+        elif streak >= 20:
+            return "🦅 Eagle Master (20+ day streak)"
+        elif streak >= 10:
+            return "🐦 Birdie Streaker (10+ day streak)"
+        elif streak >= 5:
+            return "🐤 Par Player (5+ day streak)"
+        elif streak >= 3:
+            return "🏌️ Duffer (3+ day streak)"
+        else:
+            return "Greenhorn 🌱"
 
-def get_streak_rank(streak):
-    if streak >= 30:
-        return "💚🔥 Wasabi Warlord"
-    elif streak >= 20:
-        return "🥢 Rollmaster Ronin"
-    elif streak >= 10:
-        return "🍣 Nigiri Ninja"
-    elif streak >= 5:
-        return "🍤 Tempura Titan"
-    elif streak >= 3:
-        return "🔥 Streak Samurai"
+    # Fallback to score if no streak
+    if score <= 0:
+        return "Dice Roller 🎲"
+    elif score <= 5:
+        return "Safe Square User ⭐ "
+    elif score <= 15:
+        return "Triple Six Samauri 🎲🥷"
+    elif score <= 25:
+        return "Piece Eater 🏠🔙 "
+    elif score <= 50:
+        return "Safe Zone Master 🔒"
     else:
-        return None
+        return "Goal Collector 👑🥅"
 
 # -------------------
 # Your commands below
@@ -126,7 +130,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         score_text = f"{score_val}"
         if user_total == max_total and user_total > 0:
-            score_text += " 👑⭐- Master Sushi Chef"
+            score_text += " 🎲⛳ Plato Master"
 
         streak_text = f"{streak_val}"
 
@@ -362,18 +366,18 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
         embed.add_field(
             name="👑 Top Rank",
-            value="**👑⭐ Master Sushi Chef** — Awarded to the user(s) with the highest score + streak.",
+            value="**🎲⛳ Plato Master** — Awarded to the user(s) with the highest score + streak.",
             inline=False
         )
 
         embed.add_field(
             name="🔥 Streak-Based Titles",
             value=(
-                "• 🔥 **Streak Samurai** — 3-day streak\n"
-                "• 🍤 **Tempura Titan** — 5-day streak\n"
-                "• 🍣 **Nigiri Ninja** — 10-day streak\n"
-                "• 🥢 **Rollmaster Ronin** — 20-day streak\n"
-                "• 💚🔥 **Wasabi Warlord** — 30+ day streak"
+                "• 🏌️ **Duffer** — 3+ day streak\n"
+                "• 🐤 **Par Player** — 5+ day streak\n"
+                "• 🐦 **Birdie Streaker** — 10+ day streak\n"
+                "• 🦅 **Eagle Master** — 20+ day streak\n"
+                "• 👑⛳ **Hole in One Legend** — 30+ day streak"
             ),
             inline=False
         )
@@ -381,14 +385,16 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
         embed.add_field(
             name="🎯 Score-Based Ranks",
             value=(
-                "• 🍽️ **Sushi Newbie** — 0-10 points\n"
-                "• 🍣 **Maki Novice** — 11–35 points\n"
-                "• 🍤 **Sashimi Skilled** — 36–65 points\n"
-                "• 🧠 **Brainy Botan** — 66–99 points\n"
-                "• 🧪 **Sushi Einstein** — 100+ points"
+                "• 🎲 **Dice Roller** — 0 points\n"
+                "• ⭐ **Safe Square User** — 1–5 points\n"
+                "• 🎲🥷 **Triple Six Samurai** — 6–15 points\n"
+                "• 🏠🔙 **Piece Eater** — 16–25 points\n"
+                "• 🔒 **Safe Zone Master** — 26–50 points\n"
+                "• 👑🥅 **Goal Collector** — 51+ points"
             ),
             inline=False
         )
+
 
         embed.set_footer(text="Ranks update automatically based on your progress.")
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -495,7 +501,7 @@ def setup(tree: app_commands.CommandTree, client: discord.Client):
 
                         score_line = f"{score}"
                         if score == max_score and max_score > 0:
-                            score_line += " 👑⭐ Master Sushi Chef"
+                            score_line += " 👑⭐ Plato Master"
 
                         rank = get_rank(score)
 

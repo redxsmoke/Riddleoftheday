@@ -13,7 +13,7 @@ async def get_streak(user_id: str) -> int:
 async def get_rank(score):
     # You may want to make this async if needed, or pass in pre-fetched max_score/streak
     if score >= 99:
-        return "Sushi Einstein 🧪"
+        return "🎲⛳ Plato Master"
     # Add your rank logic as needed
 
 async def get_streak_rank(streak):
@@ -64,7 +64,7 @@ class LeaderboardView(View):
 
                 score_line = f"{score_val}"
                 if score_val == max_score and max_score > 0:
-                    score_line += " - 👑⭐ Master Sushi Chef"
+                    score_line += " - 🎲⛳ Plato Master"
 
                 rank = await get_rank(score_val)
                 streak_rank = await get_streak_rank(streak_val)
@@ -121,7 +121,7 @@ async def create_leaderboard_embed(client):
 
             score_line = f"    • Score: {score_val}"
             if score_val == max_score and max_score > 0:
-                score_line += " — 👑⭐ Master Sushi Chef"
+                score_line += " — 🎲⛳ Plato Master"
 
             rank = await get_rank(score_val)
             streak_title = await get_streak_rank(streak_val)
